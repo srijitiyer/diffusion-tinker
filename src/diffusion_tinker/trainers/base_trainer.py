@@ -19,7 +19,7 @@ from peft import LoraConfig
 
 from diffusion_tinker.core.stat_tracking import PerPromptStatTracker
 from diffusion_tinker.core.trajectory import TrajectoryBatch
-from diffusion_tinker.models.sd3_patch import SD3ModelConfig, SD3SamplingOutput, sd3_sample_with_logprob
+from diffusion_tinker.models.sd3_patch import SD3ModelConfig, sd3_sample_with_logprob
 from diffusion_tinker.rewards.protocol import RewardContext, RewardFunc
 from diffusion_tinker.rewards.resolve import resolve_reward
 from diffusion_tinker.trainers.base_config import BaseDiffusionConfig
@@ -114,39 +114,50 @@ class BaseDiffusionTrainer(ABC):
 
     @torch.no_grad()
     def _sample_trajectories(self, prompts: list[str]) -> TrajectoryBatch:
-        """Generate images from current policy and collect trajectories + log-probs."""
+        """Generate images from current policy and collect trajectories + log-probs.
+
+        Processes prompts in mini-batches to avoid OOM. Each prompt generates
+        num_samples_per_prompt images, so batch size = num_samples_per_prompt
+        per prompt group.
+        """
         self.transformer.eval()
 
-        # Expand prompts: each prompt gets num_samples_per_prompt images
-        expanded_prompts = []
+        all_outputs = []
+        expanded_prompts: list[str] = []
+
+        # Process one prompt at a time (each generates num_samples_per_prompt images)
         for p in prompts:
-            expanded_prompts.extend([p] * self.config.num_samples_per_prompt)
+            batch = [p] * self.config.num_samples_per_prompt
+            expanded_prompts.extend(batch)
 
-        output: SD3SamplingOutput = sd3_sample_with_logprob(
-            pipeline=self.pipeline,
-            prompts=expanded_prompts,
-            num_inference_steps=self.config.num_inference_steps,
-            guidance_scale=self.config.guidance_scale,
-            noise_level=self.config.noise_level,
-            height=self.config.resolution,
-            width=self.config.resolution,
-        )
+            output = sd3_sample_with_logprob(
+                pipeline=self.pipeline,
+                prompts=batch,
+                num_inference_steps=self.config.num_inference_steps,
+                guidance_scale=self.config.guidance_scale,
+                noise_level=self.config.noise_level,
+                height=self.config.resolution,
+                width=self.config.resolution,
+            )
+            all_outputs.append(output)
 
-        # Compute rewards
-        ctx = RewardContext(images=output.images, prompts=expanded_prompts, device=self.device)
-        reward_output = self.reward_fn(ctx)
-
+        # Concatenate all mini-batch outputs
         trajectory = TrajectoryBatch(
-            latents=output.latents_trajectory,
-            next_latents=output.next_latents_trajectory,
-            log_probs=output.log_probs,
-            timesteps=output.timesteps,
-            prompt_embeds=output.prompt_embeds,
-            pooled_embeds=output.pooled_embeds,
+            latents=torch.cat([o.latents_trajectory for o in all_outputs], dim=0),
+            next_latents=torch.cat([o.next_latents_trajectory for o in all_outputs], dim=0),
+            log_probs=torch.cat([o.log_probs for o in all_outputs], dim=0),
+            timesteps=all_outputs[0].timesteps,  # Same schedule for all batches
+            prompt_embeds=torch.cat([o.prompt_embeds for o in all_outputs], dim=0),
+            pooled_embeds=torch.cat([o.pooled_embeds for o in all_outputs], dim=0),
             prompts=expanded_prompts,
-            rewards=reward_output.scores,
-            images=output.images,
+            rewards=None,
+            images=[img for o in all_outputs for img in o.images],
         )
+
+        # Compute rewards on all images at once (reward models are lightweight)
+        ctx = RewardContext(images=trajectory.images, prompts=expanded_prompts, device=self.device)
+        reward_output = self.reward_fn(ctx)
+        trajectory.rewards = reward_output.scores
 
         return trajectory
 

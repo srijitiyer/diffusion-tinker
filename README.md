@@ -5,7 +5,7 @@ RL-based post-training for diffusion models. TRL-style API, built on HuggingFace
 ## Quickstart
 
 ```bash
-pip install diffusion-tinker
+pip install git+https://github.com/srijitiyer/diffusion-tinker.git
 ```
 
 ```python

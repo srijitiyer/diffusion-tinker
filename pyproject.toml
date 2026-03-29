@@ -13,16 +13,14 @@ dependencies = [
     "torch>=2.1",
     "diffusers>=0.31.0",
     "transformers>=4.40.0",
-    "accelerate>=0.30.0",
     "peft>=0.12.0",
     "Pillow",
-    "tqdm",
     "huggingface-hub>=0.20.0",
     "safetensors>=0.4.0",
 ]
 
 [project.optional-dependencies]
-rewards = ["open-clip-torch"]
+rewards = []  # aesthetic reward uses transformers (already a core dep)
 wandb = ["wandb"]
 dev = [
     "diffusion-tinker[rewards,wandb]",

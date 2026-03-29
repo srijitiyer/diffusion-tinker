@@ -185,23 +185,17 @@ def sd3_sample_with_logprob(
     next_latents_traj = torch.stack(all_next_latents, dim=1)
     log_probs_traj = torch.stack(all_log_probs, dim=1)  # (B, T)
 
-    # Store the non-CFG embeddings for training replay
-    if do_cfg:
-        # prompt_embeds was doubled for CFG - take the conditional half
-        train_prompt_embeds = prompt_embeds
-        train_pooled_embeds = pooled_prompt_embeds
-    else:
-        train_prompt_embeds = prompt_embeds
-        train_pooled_embeds = pooled_prompt_embeds
-
+    # Store the conditional (non-negative) embeddings for training replay.
+    # encode_prompt returns separate conditional and negative tensors,
+    # so prompt_embeds already contains only the conditional embeddings.
     return SD3SamplingOutput(
         images=images,
         latents_trajectory=latents_traj,
         next_latents_trajectory=next_latents_traj,
         log_probs=log_probs_traj,
         timesteps=sigmas.cpu(),  # Full sigma schedule (T+1,) so we can look up sigma_next
-        prompt_embeds=train_prompt_embeds.detach().cpu(),
-        pooled_embeds=train_pooled_embeds.detach().cpu(),
+        prompt_embeds=prompt_embeds.detach().cpu(),
+        pooled_embeds=pooled_prompt_embeds.detach().cpu(),
     )
 
 

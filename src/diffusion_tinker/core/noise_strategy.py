@@ -144,10 +144,12 @@ def compute_flow_matching_loss(
     # Rectified flow forward process: x_t = (1-t)*x_0 + t*epsilon
     noisy_latents = (1.0 - sigmas_bc) * latents + sigmas_bc * noise
 
-    # Apply condition dropout for CFG
+    # Apply condition dropout for CFG (zero both sequence and pooled embeddings)
     if condition_dropout_mask is not None:
-        mask = _left_broadcast(condition_dropout_mask.float(), prompt_embeds.shape)
-        prompt_embeds = prompt_embeds * (1.0 - mask)
+        seq_mask = _left_broadcast(condition_dropout_mask.float(), prompt_embeds.shape)
+        prompt_embeds = prompt_embeds * (1.0 - seq_mask)
+        pool_mask = _left_broadcast(condition_dropout_mask.float(), pooled_embeds.shape)
+        pooled_embeds = pooled_embeds * (1.0 - pool_mask)
 
     # Model predicts velocity
     timestep = sigmas * 1000.0  # scheduler convention
