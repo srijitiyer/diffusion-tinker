@@ -193,6 +193,11 @@ def test_stat_tracker():
     assert abs(cat_adv.mean().item()) < 0.01, f"Cat advantages not centered: {cat_adv.mean()}"
     assert abs(dog_adv.mean().item()) < 0.01, f"Dog advantages not centered: {dog_adv.mean()}"
 
+    # Edge case: single-sample group should not produce NaN
+    tracker2 = PerPromptStatTracker()
+    adv2 = tracker2.update(["solo"], torch.tensor([5.0]))
+    assert torch.isfinite(adv2).all(), f"Single-sample group produced NaN: {adv2}"
+
     print("  stat_tracker: OK")
 
 
@@ -240,7 +245,7 @@ def test_trajectory_batch():
         latents=torch.randn(B, T, C, H, W),
         next_latents=torch.randn(B, T, C, H, W),
         log_probs=torch.randn(B, T),
-        timesteps=torch.linspace(0.9, 0.1, T),
+        timesteps=torch.linspace(0.9, 0.0, T + 1),  # T+1: full sigma schedule
         prompt_embeds=torch.randn(B, 10, 64),
         pooled_embeds=torch.randn(B, 32),
         prompts=["p"] * B,
@@ -323,7 +328,7 @@ def test_full_ddrl_training_step():
         latents=torch.stack(all_latents, dim=1),
         next_latents=torch.stack(all_next_latents, dim=1),
         log_probs=torch.stack(all_log_probs, dim=1),
-        timesteps=sigmas[:-1],
+        timesteps=sigmas,  # Full T+1 sigma schedule
         prompt_embeds=prompt_embeds,
         pooled_embeds=pooled_embeds,
         prompts=["test"] * B,

@@ -14,7 +14,7 @@ class TrajectoryBatch:
         latents:        (B, T, 16, 64, 64)  - latent x_t before each step
         next_latents:   (B, T, 16, 64, 64)  - latent x_{t-1} after each step
         log_probs:      (B, T)              - old policy log-probs (mean-reduced over spatial)
-        timesteps:      (T,)                - sigma values for each step
+        timesteps:      (T+1,)              - full sigma schedule (T steps + terminal 0)
         prompt_embeds:  (B, seq_len, dim)   - text encoder hidden states
         pooled_embeds:  (B, pooled_dim)     - pooled text embeddings
         rewards:        (B,)                - reward scores

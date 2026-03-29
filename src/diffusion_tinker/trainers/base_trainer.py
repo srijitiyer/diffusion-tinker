@@ -176,9 +176,9 @@ class BaseDiffusionTrainer(ABC):
             epoch_prompts = self.train_prompts.copy()
             random.shuffle(epoch_prompts)
 
-            # Process one prompt batch per epoch (for MVP simplicity)
-            # In full implementation: iterate over prompt batches
-            batch_prompts = epoch_prompts[: max(1, len(epoch_prompts) // self.config.num_samples_per_prompt)]
+            # Process all prompts each epoch. Each prompt generates num_samples_per_prompt images,
+            # so total images = len(prompts) * num_samples_per_prompt.
+            batch_prompts = epoch_prompts
 
             # 1. Sample trajectories (no_grad)
             trajectory = self._sample_trajectories(batch_prompts)

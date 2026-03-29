@@ -49,7 +49,7 @@ class SD3SamplingOutput:
     latents_trajectory: torch.Tensor  # (B, T, C, H, W) - latent before each step
     next_latents_trajectory: torch.Tensor  # (B, T, C, H, W) - latent after each step
     log_probs: torch.Tensor  # (B, T)
-    timesteps: torch.Tensor  # (T,) - sigma values
+    timesteps: torch.Tensor  # (T+1,) - full sigma schedule (includes terminal sigma=0)
     prompt_embeds: torch.Tensor  # (B, seq_len, dim)
     pooled_embeds: torch.Tensor  # (B, pooled_dim)
 
@@ -199,7 +199,7 @@ def sd3_sample_with_logprob(
         latents_trajectory=latents_traj,
         next_latents_trajectory=next_latents_traj,
         log_probs=log_probs_traj,
-        timesteps=sigmas[:-1].cpu(),
+        timesteps=sigmas.cpu(),  # Full sigma schedule (T+1,) so we can look up sigma_next
         prompt_embeds=train_prompt_embeds.detach().cpu(),
         pooled_embeds=train_pooled_embeds.detach().cpu(),
     )

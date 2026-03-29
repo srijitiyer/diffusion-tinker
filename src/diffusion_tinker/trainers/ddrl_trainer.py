@@ -80,55 +80,58 @@ class DDRLTrainer(BaseDiffusionTrainer):
         device = self.device
         config = self.config
         batch_size = len(trajectory)
-        num_timesteps = trajectory.log_probs.shape[1]
 
         # Move trajectory data to device
         trajectory = trajectory.to(device)
 
+        # timesteps is (T+1,) - full sigma schedule including terminal 0
+        # We iterate over T steps: step j uses sigma[j] -> sigma[j+1]
+        num_steps = trajectory.log_probs.shape[1]  # T
+
         total_rl_loss = 0.0
         total_data_loss = 0.0
         total_ratio = 0.0
-        num_steps = 0
+        num_computed_steps = 0
 
-        # Randomize timestep order (per TRAINING_LOOP_INTERNALS.md Section 3.1)
-        timestep_indices = list(range(num_timesteps))
+        # Randomize timestep order
+        timestep_indices = list(range(num_steps))
         random.shuffle(timestep_indices)
 
         self.optimizer.zero_grad()
 
-        for j in timestep_indices:
-            sigma = trajectory.timesteps[j].to(device)
-            sigma_next = (
-                trajectory.timesteps[j + 1].to(device)
-                if j + 1 < len(trajectory.timesteps)
-                else torch.tensor(0.0, device=device)
-            )
+        # Determine autocast dtype
+        autocast_dtype = torch.bfloat16 if config.mixed_precision == "bf16" else torch.float16
 
-            # Skip last step (noise_level=0, no gradient signal)
+        for j in timestep_indices:
+            sigma = trajectory.timesteps[j]
+            sigma_next = trajectory.timesteps[j + 1]
+
+            # Skip last step if sigma_next is near 0 (no gradient signal)
             if sigma_next.item() < 1e-6:
                 continue
 
-            latent_t = trajectory.latents[:, j].to(device)
-            next_latent_t = trajectory.next_latents[:, j].to(device)
+            latent_t = trajectory.latents[:, j]
+            next_latent_t = trajectory.next_latents[:, j]
 
             # === RL LOSS ===
-            # Replay through current model to get updated log-probs
-            log_prob_new, prev_sample_mean = sd3_replay_step(
-                transformer=self.transformer,
-                latent_t=latent_t,
-                next_latent_t=next_latent_t,
-                sigma=sigma,
-                sigma_next=sigma_next,
-                prompt_embeds=trajectory.prompt_embeds.to(device),
-                pooled_embeds=trajectory.pooled_embeds.to(device),
-                guidance_scale=config.guidance_scale,
-                noise_level=config.noise_level,
-            )
+            # Replay through current model with mixed precision
+            with torch.autocast(device_type=device.type, dtype=autocast_dtype):
+                log_prob_new, prev_sample_mean = sd3_replay_step(
+                    transformer=self.transformer,
+                    latent_t=latent_t,
+                    next_latent_t=next_latent_t,
+                    sigma=sigma,
+                    sigma_next=sigma_next,
+                    prompt_embeds=trajectory.prompt_embeds,
+                    pooled_embeds=trajectory.pooled_embeds,
+                    guidance_scale=config.guidance_scale,
+                    noise_level=config.noise_level,
+                )
 
-            log_prob_old = trajectory.log_probs[:, j].to(device)
+            log_prob_old = trajectory.log_probs[:, j]
 
-            # Importance ratio
-            ratio = torch.exp(log_prob_new - log_prob_old)
+            # Importance ratio (in float32 for stability)
+            ratio = torch.exp(log_prob_new.float() - log_prob_old.float())
 
             # PPO clipped surrogate loss
             advantages = trajectory.advantages
@@ -148,25 +151,23 @@ class DDRLTrainer(BaseDiffusionTrainer):
                 )
                 t = torch.sigmoid(u)
 
-                # Use the trajectory's latents as "clean" data for the denoising loss.
-                # Ideally we'd use a separate dataset, but for MVP we approximate by
-                # denoising from the current trajectory's initial/final latents.
-                # The next_latents at the last step are closest to clean images.
-                clean_latents = trajectory.next_latents[:, -1].to(device)
+                # Use the trajectory's final latents as approximate clean data
+                clean_latents = trajectory.next_latents[:, -1]
                 noise = torch.randn_like(clean_latents)
 
                 # Condition dropout mask
                 dropout_mask = torch.rand(batch_size, device=device) < config.condition_dropout
 
-                data_loss = compute_flow_matching_loss(
-                    transformer=self.transformer,
-                    latents=clean_latents,
-                    noise=noise,
-                    sigmas=t,
-                    prompt_embeds=trajectory.prompt_embeds.to(device),
-                    pooled_embeds=trajectory.pooled_embeds.to(device),
-                    condition_dropout_mask=dropout_mask,
-                )
+                with torch.autocast(device_type=device.type, dtype=autocast_dtype):
+                    data_loss = compute_flow_matching_loss(
+                        transformer=self.transformer,
+                        latents=clean_latents,
+                        noise=noise,
+                        sigmas=t,
+                        prompt_embeds=trajectory.prompt_embeds,
+                        pooled_embeds=trajectory.pooled_embeds,
+                        condition_dropout_mask=dropout_mask,
+                    )
 
             # === COMBINED LOSS ===
             loss = rl_loss + config.data_beta * data_loss
@@ -178,7 +179,7 @@ class DDRLTrainer(BaseDiffusionTrainer):
             total_rl_loss += rl_loss.item()
             total_data_loss += data_loss.item() if isinstance(data_loss, torch.Tensor) else data_loss
             total_ratio += ratio.mean().item()
-            num_steps += 1
+            num_computed_steps += 1
 
         # Optimizer step (after all timesteps accumulated)
         torch.nn.utils.clip_grad_norm_(
@@ -187,7 +188,7 @@ class DDRLTrainer(BaseDiffusionTrainer):
         )
         self.optimizer.step()
 
-        n = max(num_steps, 1)
+        n = max(num_computed_steps, 1)
         return {
             "rl_loss": total_rl_loss / n,
             "data_loss": total_data_loss / n,

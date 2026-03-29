@@ -38,7 +38,12 @@ class PerPromptStatTracker:
             self.stats[prompt].extend(group_rewards.tolist())
 
             mean = group_rewards.mean()
-            std = group_rewards.std()
+            # std() on a single element returns NaN with Bessel correction
+            # Use std(correction=0) for groups of 1, matching FlowGRPO behavior
+            if len(group_rewards) > 1:
+                std = group_rewards.std()
+            else:
+                std = torch.tensor(0.0)
             advantages[indices] = (group_rewards - mean) / (std + self.eps)
 
         return advantages
