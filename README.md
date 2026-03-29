@@ -1,0 +1,78 @@
+# diffusion-tinker
+
+RL-based post-training for diffusion models. TRL-style API, built on HuggingFace diffusers.
+
+## Quickstart
+
+```bash
+pip install diffusion-tinker
+```
+
+```python
+from diffusion_tinker import DDRLTrainer, DDRLConfig
+
+trainer = DDRLTrainer(
+    model="stabilityai/stable-diffusion-3.5-medium",
+    reward_funcs="aesthetic",
+    train_prompts=["a photograph of a mountain at golden hour", ...],
+    config=DDRLConfig(data_beta=0.01),
+)
+trainer.train()
+```
+
+## Supported Algorithms
+
+| Algorithm | Paper | Status |
+|-----------|-------|--------|
+| **DDRL** | [arXiv:2512.04332](https://arxiv.org/abs/2512.04332) | Implemented |
+| FlowGRPO | [arXiv:2505.05470](https://arxiv.org/abs/2505.05470) | Planned |
+| DiffusionDPO | [arXiv:2311.12908](https://arxiv.org/abs/2311.12908) | Planned |
+| DRaFT | [arXiv:2309.17400](https://arxiv.org/abs/2309.17400) | Planned |
+| DDPO | [arXiv:2305.13301](https://arxiv.org/abs/2305.13301) | Planned |
+
+## Supported Models
+
+| Model | Architecture | Status |
+|-------|-------------|--------|
+| **SD3 / SD3.5** | MMDiT, flow matching | Implemented |
+| FLUX.1 | Hybrid transformer, flow matching | Planned |
+| SDXL | UNet, epsilon prediction | Planned |
+| SD 1.5 / 2.x | UNet, epsilon/v-prediction | Planned |
+
+## Built-in Rewards
+
+| Reward | Type | Usage |
+|--------|------|-------|
+| **Aesthetic** | CLIP + MLP | `reward_funcs="aesthetic"` |
+| Custom function | Any callable | `reward_funcs=my_fn` |
+
+More rewards (CLIP score, HPS v2, PickScore, ImageReward, OCR) coming soon.
+
+## Design
+
+Each algorithm is a **Trainer + Config** pair following TRL's pattern:
+
+- `DDRLTrainer` + `DDRLConfig` - handles the full lifecycle
+- Model loading via string ID - auto-detects architecture, noise schedule, LoRA targets
+- Reward functions via string lookup or custom callables
+- Built on `diffusers` + `accelerate` + `peft` - no custom infrastructure
+
+## Requirements
+
+- Python >= 3.10
+- PyTorch >= 2.1
+- GPU with >= 16GB VRAM (24GB+ recommended)
+
+## Development
+
+```bash
+git clone https://github.com/srijitiyer/diffusion-tinker.git
+cd diffusion-tinker
+pip install -e ".[dev]"
+ruff check src/ tests/
+python tests/test_full_pipeline.py
+```
+
+## License
+
+Apache 2.0

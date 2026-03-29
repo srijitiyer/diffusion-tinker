@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment / secrets
+.env
+.env.*
+*.pem
+
+# Training outputs
+output/
+ddrl_aesthetic_output/
+ddrl_output/
+checkpoints/
+wandb/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Drafts (internal)
+drafts/
+
+# Research docs (internal reference, not shipped)
+RESEARCH_CONTEXT.md
+IMPLEMENTATION_PLAN.md
+DDRL_THEORY.md
+RL_LOSS_FUNCTIONS.md
+LOG_PROB_DERIVATIONS.md
+PIPELINE_MODIFICATIONS.md
+TRAINING_LOOP_INTERNALS.md
+NOISE_SCHEDULES_AND_LOSS.md
+ARCHITECTURE_REFERENCE.md
+LORA_AND_MEMORY_GUIDE.md
+REWARD_MODELS_TECHNICAL.md
