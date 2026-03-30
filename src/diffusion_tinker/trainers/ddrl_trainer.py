@@ -8,16 +8,18 @@ forward KL, which reduces to the standard diffusion denoising loss. Combined los
     L = L_RL + data_beta * L_data
 
 where L_RL is the clipped policy gradient and L_data is the standard denoising loss.
-
-Reference: DDRL_THEORY.md, RL_LOSS_FUNCTIONS.md Section 4
 """
 
 from __future__ import annotations
 
+import os
 import random
+import warnings
 
 import torch
+import torchvision.transforms as T
 
+from diffusion_tinker.core.latent_utils import encode_to_latents
 from diffusion_tinker.core.noise_strategy import compute_flow_matching_loss
 from diffusion_tinker.core.trajectory import TrajectoryBatch
 from diffusion_tinker.models.sd3_patch import sd3_replay_step
@@ -35,78 +37,114 @@ class DDRLTrainer(BaseDiffusionTrainer):
             model="stabilityai/stable-diffusion-3.5-medium",
             reward_funcs="aesthetic",
             train_prompts=["a photo of a cat", "a sunset over mountains"],
-            config=DDRLConfig(data_beta=0.01),
+            config=DDRLConfig(data_beta=0.01, train_dataset="laion/laion-art"),
         )
         trainer.train()
     """
 
     config: DDRLConfig
 
+    def __init__(self, model, reward_funcs, config, train_prompts=None):
+        super().__init__(model=model, reward_funcs=reward_funcs, config=config, train_prompts=train_prompts)
+        self._data_latents = None
+        self._setup_data()
+
+    def _setup_data(self):
+        """Load and pre-encode dataset images for the forward KL data loss."""
+        if self.config.train_dataset is None:
+            if self.config.data_beta > 0:
+                warnings.warn(
+                    "data_beta > 0 but no train_dataset provided. "
+                    "Falling back to trajectory endpoints for data loss (less effective). "
+                    "Set train_dataset to a HF dataset or image folder for proper DDRL.",
+                    stacklevel=2,
+                )
+            return
+
+        print(f"Loading data for DDRL forward KL: {self.config.train_dataset}...")
+        from datasets import load_dataset
+
+        # Load dataset
+        if os.path.isdir(self.config.train_dataset):
+            ds = load_dataset("imagefolder", data_dir=self.config.train_dataset, split=self.config.dataset_split)
+        else:
+            ds = load_dataset(self.config.train_dataset, split=self.config.dataset_split)
+
+        # Pre-encode images to latents
+        transform = T.Compose(
+            [
+                T.Resize(self.config.resolution, interpolation=T.InterpolationMode.BILINEAR),
+                T.CenterCrop(self.config.resolution),
+                T.ToTensor(),
+            ]
+        )
+
+        all_latents = []
+        batch_size = 8
+        max_images = min(len(ds), 5000)  # Cap at 5K images to limit memory
+
+        print(f"  Encoding {max_images} images to latents...")
+        with torch.no_grad():
+            for start in range(0, max_images, batch_size):
+                end = min(start + batch_size, max_images)
+                images = []
+                for i in range(start, end):
+                    img = ds[i][self.config.image_column]
+                    if img.mode != "RGB":
+                        img = img.convert("RGB")
+                    images.append(transform(img))
+
+                batch = torch.stack(images).to(self.device, dtype=self.vae.dtype)
+                latents = encode_to_latents(self.vae, batch)
+                all_latents.append(latents.cpu().half())  # Store as fp16 to save memory
+
+        self._data_latents = torch.cat(all_latents, dim=0)
+        print(f"  Cached {len(self._data_latents)} latents ({self._data_latents.nbytes / 1e6:.0f} MB)")
+
     def _compute_advantages(self, trajectory: TrajectoryBatch) -> TrajectoryBatch:
         """DDRL advantage computation with monotonic transform.
 
-        Standard normalization: A = (r - mean) / (beta_temp * std + eps)
-        Monotonic transform: A = -exp(-A)
-
         The -exp(-x) transform (Theorem 3.1) ensures the optimal policy takes the
-        Boltzmann form p* ~ p_data * exp(r/beta). It compresses large positive
-        advantages and amplifies negatives, providing natural gradient stability.
+        Boltzmann form p* ~ p_data * exp(r/beta).
         """
-        # Per-prompt normalization
         advantages = self.stat_tracker.update(trajectory.prompts, trajectory.rewards)
 
-        # Temperature scaling
         if self.config.beta_temp != 1.0:
             advantages = advantages / self.config.beta_temp
 
-        # Monotonic transform: lambda(x) = -exp(-x)
         if self.config.use_monotonic_transform:
             advantages = -torch.exp(-advantages)
 
-        # Clip
         advantages = torch.clamp(advantages, -self.config.adv_clip_max, self.config.adv_clip_max)
         trajectory.advantages = advantages
         return trajectory
 
     def _training_step(self, trajectory: TrajectoryBatch) -> dict[str, float]:
-        """DDRL training step: L = L_RL + data_beta * L_data.
-
-        Iterates over denoising timesteps, accumulating gradients. Each timestep:
-        1. Replay the stored transition through the current model to get new log-probs
-        2. Compute importance ratio and clipped PPO loss (RL loss)
-        3. Compute standard denoising loss on the same prompts (data loss)
-        4. Combine: loss = rl_loss + data_beta * data_loss
-        """
+        """DDRL training step: L = L_RL + data_beta * L_data."""
         device = self.device
         config = self.config
         batch_size = len(trajectory)
 
-        # Move trajectory data to device
         trajectory = trajectory.to(device)
 
-        # timesteps is (T+1,) - full sigma schedule including terminal 0
-        # We iterate over T steps: step j uses sigma[j] -> sigma[j+1]
-        num_steps = trajectory.log_probs.shape[1]  # T
+        num_steps = trajectory.log_probs.shape[1]
 
         total_rl_loss = 0.0
         total_data_loss = 0.0
         total_ratio = 0.0
         num_computed_steps = 0
 
-        # Randomize timestep order
         timestep_indices = list(range(num_steps))
         random.shuffle(timestep_indices)
 
         self.optimizer.zero_grad()
 
-        # Determine autocast dtype
         autocast_dtype = torch.bfloat16 if config.mixed_precision == "bf16" else torch.float16
 
         for j in timestep_indices:
             sigma = trajectory.timesteps[j]
             sigma_next = trajectory.timesteps[j + 1]
 
-            # Skip last step if sigma_next is near 0 (no gradient signal)
             if sigma_next.item() < 1e-6:
                 continue
 
@@ -114,7 +152,6 @@ class DDRLTrainer(BaseDiffusionTrainer):
             next_latent_t = trajectory.next_latents[:, j]
 
             # === RL LOSS ===
-            # Replay through current model with mixed precision
             with torch.autocast(device_type=device.type, dtype=autocast_dtype):
                 log_prob_new, prev_sample_mean = sd3_replay_step(
                     transformer=self.transformer,
@@ -129,11 +166,8 @@ class DDRLTrainer(BaseDiffusionTrainer):
                 )
 
             log_prob_old = trajectory.log_probs[:, j]
-
-            # Importance ratio (in float32 for stability)
             ratio = torch.exp(log_prob_new.float() - log_prob_old.float())
 
-            # PPO clipped surrogate loss
             advantages = trajectory.advantages
             unclipped = -advantages * ratio
             clipped = -advantages * torch.clamp(ratio, 1.0 - config.clip_range, 1.0 + config.clip_range)
@@ -142,20 +176,17 @@ class DDRLTrainer(BaseDiffusionTrainer):
             # === DATA LOSS (forward KL = standard denoising loss) ===
             data_loss = torch.tensor(0.0, device=device)
             if config.data_beta > 0:
-                # Sample random timestep for denoising loss (logit-normal for SD3)
-                u = torch.normal(
-                    mean=config.logit_mean,
-                    std=config.logit_std,
-                    size=(batch_size,),
-                    device=device,
-                )
+                u = torch.normal(mean=config.logit_mean, std=config.logit_std, size=(batch_size,), device=device)
                 t = torch.sigmoid(u)
 
-                # Use the trajectory's final latents as approximate clean data
-                clean_latents = trajectory.next_latents[:, -1]
-                noise = torch.randn_like(clean_latents)
+                # Use real data latents if available, otherwise fall back to trajectory endpoints
+                if self._data_latents is not None:
+                    data_idx = torch.randint(0, len(self._data_latents), (batch_size,))
+                    clean_latents = self._data_latents[data_idx].to(device, dtype=autocast_dtype)
+                else:
+                    clean_latents = trajectory.next_latents[:, -1]
 
-                # Condition dropout mask
+                noise = torch.randn_like(clean_latents)
                 dropout_mask = torch.rand(batch_size, device=device) < config.condition_dropout
 
                 with torch.autocast(device_type=device.type, dtype=autocast_dtype):
@@ -171,8 +202,6 @@ class DDRLTrainer(BaseDiffusionTrainer):
 
             # === COMBINED LOSS ===
             loss = rl_loss + config.data_beta * data_loss
-
-            # Scale by number of timesteps (gradient accumulation across steps)
             loss = loss / len(timestep_indices)
             loss.backward()
 
@@ -181,7 +210,6 @@ class DDRLTrainer(BaseDiffusionTrainer):
             total_ratio += ratio.mean().item()
             num_computed_steps += 1
 
-        # Optimizer step (after all timesteps accumulated)
         torch.nn.utils.clip_grad_norm_(
             [p for p in self.transformer.parameters() if p.requires_grad],
             config.max_grad_norm,

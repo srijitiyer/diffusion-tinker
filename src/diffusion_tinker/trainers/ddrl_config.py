@@ -30,3 +30,9 @@ class DDRLConfig(BaseDiffusionConfig):
     timestep_sampling: str = "logit_normal"
     logit_mean: float = 0.0
     logit_std: float = 1.0
+
+    # Data for forward KL regularization (denoising loss)
+    # If None, falls back to using trajectory endpoints (less effective)
+    train_dataset: str | None = None  # HF dataset name or local image folder path
+    dataset_split: str = "train"
+    image_column: str = "image"

@@ -35,6 +35,7 @@ ddrl_aesthetic_output/
 ddrl_output/
 checkpoints/
 wandb/
+results/
 
 # Jupyter
 .ipynb_checkpoints/

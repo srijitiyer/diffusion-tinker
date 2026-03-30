@@ -11,6 +11,7 @@ license = "Apache-2.0"
 requires-python = ">=3.10"
 dependencies = [
     "torch>=2.1",
+    "torchvision>=0.16.0",
     "diffusers>=0.31.0",
     "transformers>=4.40.0",
     "peft>=0.12.0",
@@ -20,10 +21,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-rewards = []  # aesthetic reward uses transformers (already a core dep)
+ocr = ["paddleocr>=2.7.0", "paddlepaddle>=2.5.0", "python-Levenshtein>=0.21.0"]
+data = ["datasets>=2.14.0"]
 wandb = ["wandb"]
 dev = [
-    "diffusion-tinker[rewards,wandb]",
+    "diffusion-tinker[data,wandb]",
     "pytest>=8.0",
     "ruff>=0.4.0",
 ]

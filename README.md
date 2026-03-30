@@ -25,8 +25,8 @@ trainer.train()
 | Algorithm | Paper | Status |
 |-----------|-------|--------|
 | **DDRL** | [arXiv:2512.04332](https://arxiv.org/abs/2512.04332) | Implemented |
-| FlowGRPO | [arXiv:2505.05470](https://arxiv.org/abs/2505.05470) | Planned |
-| DiffusionDPO | [arXiv:2311.12908](https://arxiv.org/abs/2311.12908) | Planned |
+| **FlowGRPO** | [arXiv:2505.05470](https://arxiv.org/abs/2505.05470) | Implemented |
+| **DiffusionDPO** | [arXiv:2311.12908](https://arxiv.org/abs/2311.12908) | Implemented |
 | DRaFT | [arXiv:2309.17400](https://arxiv.org/abs/2309.17400) | Planned |
 | DDPO | [arXiv:2305.13301](https://arxiv.org/abs/2305.13301) | Planned |
 
@@ -44,24 +44,26 @@ trainer.train()
 | Reward | Type | Usage |
 |--------|------|-------|
 | **Aesthetic** | CLIP + MLP | `reward_funcs="aesthetic"` |
+| **CLIP Score** | CLIP cosine similarity | `reward_funcs="clip_score"` |
+| **OCR** | PaddleOCR edit distance | `reward_funcs="ocr"` |
 | Custom function | Any callable | `reward_funcs=my_fn` |
-
-More rewards (CLIP score, HPS v2, PickScore, ImageReward, OCR) coming soon.
 
 ## Design
 
 Each algorithm is a **Trainer + Config** pair following TRL's pattern:
 
-- `DDRLTrainer` + `DDRLConfig` - handles the full lifecycle
-- Model loading via string ID - auto-detects architecture, noise schedule, LoRA targets
+- `DDRLTrainer` + `DDRLConfig` with forward KL data regularization
+- `FlowGRPOTrainer` + `FlowGRPOConfig` with optional KL and GRPO-Guard
+- `DiffusionDPOTrainer` + `DiffusionDPOConfig` for offline preference learning
+- Model loading via string ID with auto-detected architecture and LoRA targets
 - Reward functions via string lookup or custom callables
-- Built on `diffusers` + `accelerate` + `peft` - no custom infrastructure
+- Built on `diffusers` + `peft` with no custom infrastructure
 
 ## Requirements
 
 - Python >= 3.10
 - PyTorch >= 2.1
-- GPU with >= 16GB VRAM (24GB+ recommended)
+- GPU with >= 24GB VRAM (A100 80GB recommended)
 
 ## Development
 
