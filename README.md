@@ -20,51 +20,82 @@ trainer = DDRLTrainer(
 trainer.train()
 ```
 
+Multi-reward training:
+
+```python
+from diffusion_tinker import FlowGRPOTrainer, FlowGRPOConfig
+
+trainer = FlowGRPOTrainer(
+    model="stabilityai/stable-diffusion-3.5-medium",
+    reward_funcs=["aesthetic", "clip_score"],
+    reward_weights=[0.6, 0.4],
+    reward_mode="advantage_level",
+    train_prompts=prompts,
+    config=FlowGRPOConfig(kl_beta=0.01),
+)
+trainer.train()
+```
+
 ## Supported Algorithms
 
-| Algorithm | Paper | Status |
-|-----------|-------|--------|
-| **DDRL** | [arXiv:2512.04332](https://arxiv.org/abs/2512.04332) | Implemented |
-| **FlowGRPO** | [arXiv:2505.05470](https://arxiv.org/abs/2505.05470) | Implemented |
-| **DiffusionDPO** | [arXiv:2311.12908](https://arxiv.org/abs/2311.12908) | Implemented |
-| **DRaFT** | [arXiv:2309.17400](https://arxiv.org/abs/2309.17400) | Implemented |
-| **DDPO/DPOK** | [arXiv:2305.13301](https://arxiv.org/abs/2305.13301) | Implemented |
-| **SFT** | Standard denoising loss | Implemented |
+| Algorithm | Trainer | Paper |
+|-----------|---------|-------|
+| **DDRL** | `DDRLTrainer` | [arXiv:2512.04332](https://arxiv.org/abs/2512.04332) |
+| **FlowGRPO** | `FlowGRPOTrainer` | [arXiv:2505.05470](https://arxiv.org/abs/2505.05470) |
+| **DiffusionDPO** | `DiffusionDPOTrainer` | [arXiv:2311.12908](https://arxiv.org/abs/2311.12908) |
+| **DRaFT** | `DRaFTTrainer` | [arXiv:2309.17400](https://arxiv.org/abs/2309.17400) |
+| **DDPO/DPOK** | `DDPOTrainer` | [arXiv:2305.13301](https://arxiv.org/abs/2305.13301) |
+| **SFT** | `SFTTrainer` | Standard denoising loss |
 
 ## Supported Models
 
-| Model | Architecture | Status |
-|-------|-------------|--------|
-| **SD3 / SD3.5** | MMDiT, flow matching | Implemented |
-| **FLUX.1** | Hybrid transformer, flow matching | Implemented |
-| SDXL | UNet, epsilon prediction | Planned |
-| SD 1.5 / 2.x | UNet, epsilon/v-prediction | Planned |
+| Model | Architecture |
+|-------|-------------|
+| **SD3 / SD3.5** | MMDiT, flow matching |
+| **FLUX.1** | Hybrid transformer, flow matching |
 
 ## Built-in Rewards
 
-| Reward | Type | Usage |
-|--------|------|-------|
-| **Aesthetic** | CLIP + MLP | `reward_funcs="aesthetic"` |
-| **CLIP Score** | CLIP cosine similarity | `reward_funcs="clip_score"` |
-| **HPS v2** | OpenCLIP ViT-H-14 | `reward_funcs="hps_v2"` |
-| **OCR** | PaddleOCR edit distance | `reward_funcs="ocr"` |
-| Custom function | Any callable | `reward_funcs=my_fn` |
+| Reward | Usage | Optional Dependency |
+|--------|-------|-------------------|
+| **Aesthetic** | `"aesthetic"` | None (uses transformers) |
+| **CLIP Score** | `"clip_score"` | None (uses transformers) |
+| **HPS v2** | `"hps_v2"` | `pip install .[hps]` |
+| **OCR** | `"ocr"` | `pip install .[ocr]` |
+| **Custom** | `reward_funcs=my_fn` | None |
+| **Multi-reward** | `["aesthetic", "clip_score"]` | None |
 
-## Design
+## Examples
 
-Each algorithm is a **Trainer + Config** pair following TRL's pattern:
+See the `examples/` directory:
 
-- `DDRLTrainer` + `DDRLConfig` with forward KL data regularization
-- `FlowGRPOTrainer` + `FlowGRPOConfig` with optional KL and GRPO-Guard
-- `DiffusionDPOTrainer` + `DiffusionDPOConfig` for offline preference learning
-- `DDPOTrainer` + `DDPOConfig` with multi-epoch PPO and optional DPOK KL
-- `DRaFTTrainer` + `DRaFTConfig` for direct reward backprop (DRaFT-1/K)
-- `SFTTrainer` + `SFTConfig` for standard supervised fine-tuning
-- Multi-reward: `reward_funcs=["aesthetic", "clip_score"]` with `reward_weights`
-- Model loading via string ID with auto-detected architecture and LoRA targets
-- SD3/SD3.5 and FLUX.1 pipeline support with SDE sampling and log-prob collection
-- Reward functions via string lookup or custom callables
-- Built on `diffusers` + `peft` with no custom infrastructure
+- `ddrl_aesthetic.py` - DDRL with aesthetic reward
+- `flowgrpo_multi_reward.py` - FlowGRPO with combined aesthetic + CLIP score
+- `dpo_pickapic.py` - DiffusionDPO on Pick-a-Pic preference dataset
+- `draft_aesthetic.py` - DRaFT-1 with direct reward backprop
+- `sft_naruto.py` - SFT on naruto image dataset
+
+## Installation
+
+Core (all RL trainers + aesthetic + CLIP score):
+```bash
+pip install git+https://github.com/srijitiyer/diffusion-tinker.git
+```
+
+With HPS v2 reward:
+```bash
+pip install "diffusion-tinker[hps] @ git+https://github.com/srijitiyer/diffusion-tinker.git"
+```
+
+With OCR reward:
+```bash
+pip install "diffusion-tinker[ocr] @ git+https://github.com/srijitiyer/diffusion-tinker.git"
+```
+
+With dataset support (for SFT and DiffusionDPO):
+```bash
+pip install "diffusion-tinker[data] @ git+https://github.com/srijitiyer/diffusion-tinker.git"
+```
 
 ## Requirements
 
