@@ -88,8 +88,10 @@ class AestheticReward(BaseReward):
         inputs = self._processor(images=ctx.images, return_tensors="pt")
         pixel_values = inputs["pixel_values"].to(self.device, self.dtype)
 
-        # Get CLIP image features
+        # Get CLIP image features (handle both tensor and object return types)
         embed = self._clip.get_image_features(pixel_values=pixel_values)
+        if not isinstance(embed, torch.Tensor):
+            embed = embed.image_embeds if hasattr(embed, "image_embeds") else embed[0]
 
         # L2 normalize
         embed = embed / torch.linalg.vector_norm(embed, dim=-1, keepdim=True)
