@@ -48,8 +48,11 @@ class PreferenceDataset(Dataset):
         # Some datasets encode preference via a label column
         # label_0 > 0.5 means jpg_0 is preferred, else jpg_1
         if self.label_col and self.label_col in row:
-            if row[self.label_col] < 0.5:
-                winner_img, loser_img = loser_img, winner_img
+            try:
+                if float(row[self.label_col]) < 0.5:
+                    winner_img, loser_img = loser_img, winner_img
+            except (TypeError, ValueError):
+                pass  # Non-numeric label, assume default ordering
 
         if isinstance(winner_img, str):
             winner_img = Image.open(winner_img)

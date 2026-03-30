@@ -189,27 +189,93 @@ class DRaFTTrainer:
         return images_tensor, pil_images
 
     def _training_step(self, prompts: list[str]) -> dict[str, float]:
-        """Generate images with grad, compute reward, backprop."""
+        """Generate images with grad, compute differentiable reward, backprop.
+
+        DRaFT requires gradient flow from reward -> VAE decode -> denoising steps -> LoRA.
+        The reward must be computed on the image TENSOR (not PIL), keeping the grad graph.
+        We use the CLIP vision model directly on the differentiable image tensor.
+        """
         config = self.config
         autocast_dtype = torch.bfloat16 if config.mixed_precision == "bf16" else torch.float16
 
         with torch.autocast(device_type=self.device.type, dtype=autocast_dtype):
             images_tensor, pil_images = self._denoise_with_grad(prompts)
 
-        # Compute reward - call _compute directly to bypass @torch.no_grad() wrapper.
-        # DRaFT requires gradient flow through the reward for direct backprop.
-        ctx = RewardContext(images=pil_images, prompts=prompts, device=self.device)
-        reward_output = self.reward_fn._compute(ctx)
-        rewards = reward_output.scores.to(self.device)
+        # Compute differentiable reward directly on the image tensor.
+        # We need gradients to flow: images_tensor -> reward -> loss -> backward.
+        # The standard reward._compute() operates on PIL (no grad). For DRaFT,
+        # we compute a differentiable proxy using CLIP image features on the tensor.
+        rewards = self._differentiable_reward(images_tensor, prompts)
 
-        # Loss = negative mean reward (maximize reward)
         loss = -rewards.mean()
         loss.backward()
 
         return {
             "loss": loss.item(),
-            "mean_reward": rewards.mean().item(),
+            "mean_reward": rewards.detach().mean().item(),
         }
+
+    def _differentiable_reward(self, images: torch.Tensor, prompts: list[str]) -> torch.Tensor:
+        """Compute reward on image tensor with gradient flow preserved.
+
+        Uses CLIP-based scoring directly on the tensor to maintain the computation graph.
+        Falls back to non-differentiable reward with a warning if the reward model
+        doesn't support tensor input.
+        """
+        from torchvision.transforms.functional import normalize, resize
+
+        # Ensure the reward model's CLIP is loaded
+        self.reward_fn._ensure_loaded()
+
+        # Differentiable image preprocessing for CLIP (resize + normalize)
+        # These operations preserve gradients
+        images_resized = resize(images, [224, 224], antialias=True)
+        images_normalized = normalize(
+            images_resized,
+            mean=[0.48145466, 0.4578275, 0.40821073],
+            std=[0.26862954, 0.26130258, 0.27577711],
+        )
+
+        # Forward through CLIP vision model (preserves gradients)
+        if hasattr(self.reward_fn, "_clip"):
+            clip = self.reward_fn._clip
+            vision_out = clip.vision_model(pixel_values=images_normalized.to(clip.dtype))
+            embed = clip.visual_projection(vision_out.pooler_output)
+            embed = embed / torch.linalg.vector_norm(embed, dim=-1, keepdim=True)
+
+            # Route to aesthetic MLP if available, else use CLIP-text similarity
+            if hasattr(self.reward_fn, "_mlp"):
+                scores = self.reward_fn._mlp(embed).squeeze(-1)
+            else:
+                # CLIP score path: compute similarity with text
+                tokenizer = self.reward_fn._processor.tokenizer
+                text_inputs = tokenizer(prompts, padding=True, truncation=True, max_length=77, return_tensors="pt")
+                text_inputs = {k: v.to(self.device) for k, v in text_inputs.items()}
+                text_out = clip.text_model(**text_inputs)
+                text_features = clip.text_projection(text_out.pooler_output)
+                text_features = text_features / torch.linalg.vector_norm(text_features, dim=-1, keepdim=True)
+                scores = (embed * text_features.detach()).sum(dim=-1) * 100.0
+        else:
+            import warnings
+
+            warnings.warn(
+                "DRaFT reward does not have a CLIP model. "
+                "Gradients will NOT flow through the reward. Use aesthetic or clip_score.",
+                stacklevel=2,
+            )
+            ctx = RewardContext(
+                images=[
+                    __import__("PIL").Image.fromarray(
+                        (images[i].detach().cpu() * 255).clamp(0, 255).byte().permute(1, 2, 0).numpy()
+                    )
+                    for i in range(images.shape[0])
+                ],
+                prompts=prompts,
+                device=self.device,
+            )
+            scores = self.reward_fn._compute(ctx).scores.to(self.device)
+
+        return scores
 
     def train(self):
         """Main training loop."""
