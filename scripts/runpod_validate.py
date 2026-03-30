@@ -30,7 +30,7 @@ PROMPTS = [
 def check_gpu():
     assert torch.cuda.is_available(), "No GPU found"
     name = torch.cuda.get_device_name(0)
-    vram = torch.cuda.get_device_properties(0).total_mem / 1e9
+    vram = torch.cuda.get_device_properties(0).total_memory / 1e9
     print(f"GPU: {name} ({vram:.0f} GB)")
     assert vram >= 40, f"Need >= 40GB VRAM, got {vram:.0f} GB"
     return name, vram
