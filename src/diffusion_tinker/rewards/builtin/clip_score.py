@@ -48,16 +48,13 @@ class CLIPScoreReward(BaseReward):
         input_ids = inputs["input_ids"].to(self.device)
         attention_mask = inputs["attention_mask"].to(self.device)
 
-        # Get image and text features
-        image_features = self._clip.get_image_features(pixel_values=pixel_values)
-        if not isinstance(image_features, torch.Tensor):
-            image_features = self._clip.visual_projection(
-                self._clip.vision_model(pixel_values=pixel_values).pooler_output
-            )
+        # Get image features via vision model + projection (avoids API differences across transformers versions)
+        vision_out = self._clip.vision_model(pixel_values=pixel_values)
+        image_features = self._clip.visual_projection(vision_out.pooler_output)
 
-        text_features = self._clip.get_text_features(input_ids=input_ids, attention_mask=attention_mask)
-        if not isinstance(text_features, torch.Tensor):
-            text_features = text_features.text_embeds if hasattr(text_features, "text_embeds") else text_features[0]
+        # Get text features via text model + projection
+        text_out = self._clip.text_model(input_ids=input_ids, attention_mask=attention_mask)
+        text_features = self._clip.text_projection(text_out.pooler_output)
 
         # L2 normalize
         image_features = image_features / torch.linalg.vector_norm(image_features, dim=-1, keepdim=True)

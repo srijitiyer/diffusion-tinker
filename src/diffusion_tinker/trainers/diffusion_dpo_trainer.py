@@ -192,22 +192,24 @@ class DiffusionDPOTrainer:
         # Reference model predictions (disable LoRA)
         with torch.no_grad():
             self.transformer.disable_adapter_layers()
-            with torch.autocast(device_type=device.type, dtype=autocast_dtype):
-                v_ref_w = self.transformer(
-                    hidden_states=noisy_w,
-                    timestep=timestep,
-                    encoder_hidden_states=prompt_embeds,
-                    pooled_projections=pooled_embeds,
-                    return_dict=False,
-                )[0]
-                v_ref_l = self.transformer(
-                    hidden_states=noisy_l,
-                    timestep=timestep,
-                    encoder_hidden_states=prompt_embeds,
-                    pooled_projections=pooled_embeds,
-                    return_dict=False,
-                )[0]
-            self.transformer.enable_adapter_layers()
+            try:
+                with torch.autocast(device_type=device.type, dtype=autocast_dtype):
+                    v_ref_w = self.transformer(
+                        hidden_states=noisy_w,
+                        timestep=timestep,
+                        encoder_hidden_states=prompt_embeds,
+                        pooled_projections=pooled_embeds,
+                        return_dict=False,
+                    )[0]
+                    v_ref_l = self.transformer(
+                        hidden_states=noisy_l,
+                        timestep=timestep,
+                        encoder_hidden_states=prompt_embeds,
+                        pooled_projections=pooled_embeds,
+                        return_dict=False,
+                    )[0]
+            finally:
+                self.transformer.enable_adapter_layers()
 
         # Denoising errors (MSE per sample)
         loss_w_model = (v_target_w.float() - v_pred_w.float()).pow(2).mean(dim=[1, 2, 3])

@@ -99,19 +99,21 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
                 # Get reference model prediction by disabling LoRA adapter
                 with torch.no_grad():
                     self.transformer.disable_adapter_layers()
-                    with torch.autocast(device_type=device.type, dtype=autocast_dtype):
-                        _, prev_sample_mean_ref = sd3_replay_step(
-                            transformer=self.transformer,
-                            latent_t=latent_t,
-                            next_latent_t=next_latent_t,
-                            sigma=sigma,
-                            sigma_next=sigma_next,
-                            prompt_embeds=trajectory.prompt_embeds,
-                            pooled_embeds=trajectory.pooled_embeds,
-                            guidance_scale=config.guidance_scale,
-                            noise_level=config.noise_level,
-                        )
-                    self.transformer.enable_adapter_layers()
+                    try:
+                        with torch.autocast(device_type=device.type, dtype=autocast_dtype):
+                            _, prev_sample_mean_ref = sd3_replay_step(
+                                transformer=self.transformer,
+                                latent_t=latent_t,
+                                next_latent_t=next_latent_t,
+                                sigma=sigma,
+                                sigma_next=sigma_next,
+                                prompt_embeds=trajectory.prompt_embeds,
+                                pooled_embeds=trajectory.pooled_embeds,
+                                guidance_scale=config.guidance_scale,
+                                noise_level=config.noise_level,
+                            )
+                    finally:
+                        self.transformer.enable_adapter_layers()
 
                 # KL ~ (mean_current - mean_ref)^2 / (2 * noise_std^2)
                 # Compute noise_std from the SDE formula
