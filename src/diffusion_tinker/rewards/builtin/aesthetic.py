@@ -88,15 +88,16 @@ class AestheticReward(BaseReward):
         inputs = self._processor(images=ctx.images, return_tensors="pt")
         pixel_values = inputs["pixel_values"].to(self.device, self.dtype)
 
-        # Get CLIP image features (handle both tensor and object return types)
-        embed = self._clip.get_image_features(pixel_values=pixel_values)
-        if not isinstance(embed, torch.Tensor):
-            embed = embed.image_embeds if hasattr(embed, "image_embeds") else embed[0]
+        # Get CLIP image embeddings via the vision model + projection
+        vision_out = self._clip.vision_model(pixel_values=pixel_values)
+        # Pool: use the CLS token output (first token), then project
+        pooled = vision_out.pooler_output  # (B, 768)
+        embed = self._clip.visual_projection(pooled)  # (B, 768)
 
         # L2 normalize
         embed = embed / torch.linalg.vector_norm(embed, dim=-1, keepdim=True)
 
-        # MLP forward
+        # MLP forward (expects 768-dim input)
         scores = self._mlp(embed).squeeze(-1)
 
         return RewardOutput(scores=scores.float().cpu())
