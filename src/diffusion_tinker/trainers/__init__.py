@@ -5,6 +5,10 @@ _LAZY_IMPORTS = {
     "FlowGRPOTrainer": "diffusion_tinker.trainers.flowgrpo_trainer",
     "DiffusionDPOConfig": "diffusion_tinker.trainers.diffusion_dpo_config",
     "DiffusionDPOTrainer": "diffusion_tinker.trainers.diffusion_dpo_trainer",
+    "DDPOConfig": "diffusion_tinker.trainers.ddpo_config",
+    "DDPOTrainer": "diffusion_tinker.trainers.ddpo_trainer",
+    "DRaFTConfig": "diffusion_tinker.trainers.draft_config",
+    "DRaFTTrainer": "diffusion_tinker.trainers.draft_trainer",
 }
 
 

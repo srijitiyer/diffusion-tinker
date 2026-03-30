@@ -27,15 +27,15 @@ trainer.train()
 | **DDRL** | [arXiv:2512.04332](https://arxiv.org/abs/2512.04332) | Implemented |
 | **FlowGRPO** | [arXiv:2505.05470](https://arxiv.org/abs/2505.05470) | Implemented |
 | **DiffusionDPO** | [arXiv:2311.12908](https://arxiv.org/abs/2311.12908) | Implemented |
-| DRaFT | [arXiv:2309.17400](https://arxiv.org/abs/2309.17400) | Planned |
-| DDPO | [arXiv:2305.13301](https://arxiv.org/abs/2305.13301) | Planned |
+| **DRaFT** | [arXiv:2309.17400](https://arxiv.org/abs/2309.17400) | Implemented |
+| **DDPO/DPOK** | [arXiv:2305.13301](https://arxiv.org/abs/2305.13301) | Implemented |
 
 ## Supported Models
 
 | Model | Architecture | Status |
 |-------|-------------|--------|
 | **SD3 / SD3.5** | MMDiT, flow matching | Implemented |
-| FLUX.1 | Hybrid transformer, flow matching | Planned |
+| **FLUX.1** | Hybrid transformer, flow matching | Implemented |
 | SDXL | UNet, epsilon prediction | Planned |
 | SD 1.5 / 2.x | UNet, epsilon/v-prediction | Planned |
 
@@ -45,6 +45,7 @@ trainer.train()
 |--------|------|-------|
 | **Aesthetic** | CLIP + MLP | `reward_funcs="aesthetic"` |
 | **CLIP Score** | CLIP cosine similarity | `reward_funcs="clip_score"` |
+| **HPS v2** | OpenCLIP ViT-H-14 | `reward_funcs="hps_v2"` |
 | **OCR** | PaddleOCR edit distance | `reward_funcs="ocr"` |
 | Custom function | Any callable | `reward_funcs=my_fn` |
 
@@ -55,7 +56,10 @@ Each algorithm is a **Trainer + Config** pair following TRL's pattern:
 - `DDRLTrainer` + `DDRLConfig` with forward KL data regularization
 - `FlowGRPOTrainer` + `FlowGRPOConfig` with optional KL and GRPO-Guard
 - `DiffusionDPOTrainer` + `DiffusionDPOConfig` for offline preference learning
+- `DDPOTrainer` + `DDPOConfig` with multi-epoch PPO and optional DPOK KL
+- `DRaFTTrainer` + `DRaFTConfig` for direct reward backprop (DRaFT-1/K)
 - Model loading via string ID with auto-detected architecture and LoRA targets
+- SD3/SD3.5 and FLUX.1 pipeline support with SDE sampling and log-prob collection
 - Reward functions via string lookup or custom callables
 - Built on `diffusers` + `peft` with no custom infrastructure
 
