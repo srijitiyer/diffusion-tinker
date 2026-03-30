@@ -154,10 +154,10 @@ def flux_sample_with_logprob(
 
         timestep = sigma.expand(batch_size)
 
-        # Transformer forward
+        # Transformer forward (FLUX expects raw sigma, not sigma*1000 like SD3)
         noise_pred = pipeline.transformer(
             hidden_states=latents,
-            timestep=timestep / 1000.0,  # FLUX uses raw sigma, not sigma*1000
+            timestep=timestep,
             encoder_hidden_states=prompt_embeds,
             pooled_projections=pooled_prompt_embeds,
             img_ids=img_ids,
@@ -230,7 +230,7 @@ def flux_replay_step(
 
     noise_pred = transformer(
         hidden_states=latent_t,
-        timestep=timestep / 1000.0,
+        timestep=timestep,
         encoder_hidden_states=prompt_embeds,
         pooled_projections=pooled_embeds,
         img_ids=img_ids,

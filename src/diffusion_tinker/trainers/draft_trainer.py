@@ -196,9 +196,10 @@ class DRaFTTrainer:
         with torch.autocast(device_type=self.device.type, dtype=autocast_dtype):
             images_tensor, pil_images = self._denoise_with_grad(prompts)
 
-        # Compute reward (needs to be differentiable for DRaFT)
+        # Compute reward - call _compute directly to bypass @torch.no_grad() wrapper.
+        # DRaFT requires gradient flow through the reward for direct backprop.
         ctx = RewardContext(images=pil_images, prompts=prompts, device=self.device)
-        reward_output = self.reward_fn(ctx)
+        reward_output = self.reward_fn._compute(ctx)
         rewards = reward_output.scores.to(self.device)
 
         # Loss = negative mean reward (maximize reward)

@@ -53,11 +53,11 @@ class DDPOTrainer(BaseDiffusionTrainer):
 
         autocast_dtype = torch.bfloat16 if config.mixed_precision == "bf16" else torch.float16
 
+        self.optimizer.zero_grad()
+
         for ppo_epoch in range(config.ppo_epochs):
             timestep_indices = list(range(num_steps))
             random.shuffle(timestep_indices)
-
-            self.optimizer.zero_grad()
 
             for j in timestep_indices:
                 sigma = trajectory.timesteps[j]
@@ -129,12 +129,12 @@ class DDPOTrainer(BaseDiffusionTrainer):
                 total_ratio += ratio.mean().item()
                 total_computed += 1
 
-            # Step optimizer after each PPO epoch
-            torch.nn.utils.clip_grad_norm_(
-                [p for p in self.transformer.parameters() if p.requires_grad],
-                config.max_grad_norm,
-            )
-            self.optimizer.step()
+        # Step optimizer after all PPO epochs
+        torch.nn.utils.clip_grad_norm_(
+            [p for p in self.transformer.parameters() if p.requires_grad],
+            config.max_grad_norm,
+        )
+        self.optimizer.step()
 
         n = max(total_computed, 1)
         return {

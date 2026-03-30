@@ -59,7 +59,7 @@ class ComposedReward(BaseReward):
             combined = torch.zeros_like(all_scores[0])
             for scores, w in zip(all_scores, self.weights):
                 mean = scores.mean()
-                std = scores.std()
+                std = scores.std() if len(scores) > 1 else torch.tensor(0.0)
                 normalized = (scores - mean) / (std + 1e-4)
                 combined = combined + w * normalized
         else:
