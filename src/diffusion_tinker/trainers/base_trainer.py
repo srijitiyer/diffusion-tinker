@@ -37,6 +37,8 @@ class BaseDiffusionTrainer(ABC):
         reward_funcs: RewardFunc,
         config: BaseDiffusionConfig,
         train_prompts: list[str] | None = None,
+        reward_weights: list[float] | None = None,
+        reward_mode: str = "weighted_sum",
     ):
         self.config = config
         self.train_prompts = train_prompts or []
@@ -50,9 +52,11 @@ class BaseDiffusionTrainer(ABC):
         # Load model
         self._setup_model(model)
 
-        # Set up reward
+        # Set up reward (supports multi-reward: reward_funcs=["aesthetic", "clip_score"])
         reward_device = self.device
-        self.reward_fn = resolve_reward(reward_funcs, device=str(reward_device))
+        self.reward_fn = resolve_reward(
+            reward_funcs, device=str(reward_device), reward_weights=reward_weights, reward_mode=reward_mode
+        )
 
         # Stat tracking for per-prompt advantage normalization
         self.stat_tracker = PerPromptStatTracker()

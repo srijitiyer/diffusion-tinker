@@ -41,7 +41,12 @@ class _CallableWrapper(BaseReward):
         raise TypeError(f"Reward function returned unsupported type: {type(result)}")
 
 
-def resolve_reward(reward_func: RewardFunc, device: str = "cpu") -> BaseReward:
+def resolve_reward(
+    reward_func: RewardFunc,
+    device: str = "cpu",
+    reward_weights: list[float] | None = None,
+    reward_mode: str = "weighted_sum",
+) -> BaseReward:
     """Resolve a reward specification into a callable BaseReward.
 
     Args:
@@ -49,12 +54,20 @@ def resolve_reward(reward_func: RewardFunc, device: str = "cpu") -> BaseReward:
             - str: look up in REWARD_REGISTRY (e.g., "aesthetic")
             - Callable: wrap as BaseReward
             - BaseReward: return directly
+            - list: multiple rewards, combined via ComposedReward
         device: device for the reward model
+        reward_weights: weights for multi-reward (only used when reward_func is a list)
+        reward_mode: aggregation mode for multi-reward ("weighted_sum" or "advantage_level")
 
     Returns:
         A BaseReward instance ready to call.
     """
-    if isinstance(reward_func, str):
+    if isinstance(reward_func, list):
+        from diffusion_tinker.rewards.compose import ComposedReward
+
+        resolved = [resolve_reward(r, device=device) for r in reward_func]
+        return ComposedReward(rewards=resolved, weights=reward_weights, mode=reward_mode, device=device)
+    elif isinstance(reward_func, str):
         if reward_func not in REWARD_REGISTRY:
             available = ", ".join(sorted(REWARD_REGISTRY.keys()))
             raise ValueError(f"Unknown reward '{reward_func}'. Available: {available}")

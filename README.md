@@ -29,6 +29,7 @@ trainer.train()
 | **DiffusionDPO** | [arXiv:2311.12908](https://arxiv.org/abs/2311.12908) | Implemented |
 | **DRaFT** | [arXiv:2309.17400](https://arxiv.org/abs/2309.17400) | Implemented |
 | **DDPO/DPOK** | [arXiv:2305.13301](https://arxiv.org/abs/2305.13301) | Implemented |
+| **SFT** | Standard denoising loss | Implemented |
 
 ## Supported Models
 
@@ -58,6 +59,8 @@ Each algorithm is a **Trainer + Config** pair following TRL's pattern:
 - `DiffusionDPOTrainer` + `DiffusionDPOConfig` for offline preference learning
 - `DDPOTrainer` + `DDPOConfig` with multi-epoch PPO and optional DPOK KL
 - `DRaFTTrainer` + `DRaFTConfig` for direct reward backprop (DRaFT-1/K)
+- `SFTTrainer` + `SFTConfig` for standard supervised fine-tuning
+- Multi-reward: `reward_funcs=["aesthetic", "clip_score"]` with `reward_weights`
 - Model loading via string ID with auto-detected architecture and LoRA targets
 - SD3/SD3.5 and FLUX.1 pipeline support with SDE sampling and log-prob collection
 - Reward functions via string lookup or custom callables

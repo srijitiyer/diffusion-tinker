@@ -9,6 +9,8 @@ _LAZY_IMPORTS = {
     "DDPOTrainer": "diffusion_tinker.trainers.ddpo_trainer",
     "DRaFTConfig": "diffusion_tinker.trainers.draft_config",
     "DRaFTTrainer": "diffusion_tinker.trainers.draft_trainer",
+    "SFTConfig": "diffusion_tinker.trainers.sft_config",
+    "SFTTrainer": "diffusion_tinker.trainers.sft_trainer",
 }
 
 
