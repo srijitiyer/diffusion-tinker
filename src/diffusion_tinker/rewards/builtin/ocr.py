@@ -72,7 +72,11 @@ class OCRReward(BaseReward):
             return
         from paddleocr import PaddleOCR
 
-        self._ocr = PaddleOCR(use_angle_cls=False, lang="en", use_gpu=False, show_log=False)
+        try:
+            self._ocr = PaddleOCR(use_angle_cls=False, lang="en", use_gpu=False, show_log=False)
+        except (TypeError, ValueError):
+            # Newer PaddleOCR removed show_log and use_angle_cls params
+            self._ocr = PaddleOCR(lang="en", use_gpu=False)
 
     def _score_single(self, image, target: str) -> float:
         if not target:

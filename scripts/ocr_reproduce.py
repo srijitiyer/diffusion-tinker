@@ -65,7 +65,10 @@ def check_ocr():
     try:
         from paddleocr import PaddleOCR
 
-        PaddleOCR(use_angle_cls=False, lang="en", use_gpu=False, show_log=False)
+        try:
+            PaddleOCR(use_angle_cls=False, lang="en", use_gpu=False, show_log=False)
+        except (TypeError, ValueError):
+            PaddleOCR(lang="en", use_gpu=False)
         print("PaddleOCR: OK")
         return True
     except ImportError:

@@ -43,6 +43,7 @@ python -c "from diffusers import StableDiffusion3Pipeline; print('diffusers: OK'
 
 echo ""
 echo "Starting OCR reproduction..."
+mkdir -p /workspace/ocr_results
 python scripts/ocr_reproduce.py 2>&1 | tee /workspace/ocr_results/training.log
 
 echo ""
