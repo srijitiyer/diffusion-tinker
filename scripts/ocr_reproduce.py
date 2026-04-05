@@ -62,19 +62,11 @@ def check_hf_access():
 
 
 def check_ocr():
-    try:
-        from paddleocr import PaddleOCR
+    import easyocr
 
-        try:
-            PaddleOCR(use_angle_cls=False, lang="en", use_gpu=False, show_log=False)
-        except (TypeError, ValueError):
-            PaddleOCR(lang="en", use_gpu=False)
-        print("PaddleOCR: OK")
-        return True
-    except ImportError:
-        print("PaddleOCR not installed. Installing...")
-        os.system("pip install paddleocr paddlepaddle python-Levenshtein --quiet")
-        return True
+    easyocr.Reader(["en"], gpu=False, verbose=False)
+    print("EasyOCR: OK")
+    return True
 
 
 def generate_eval_images(trainer, prompts, output_dir, label=""):
