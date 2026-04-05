@@ -22,7 +22,7 @@ dependencies = [
 
 [project.optional-dependencies]
 hps = ["open-clip-torch>=2.24.0"]
-ocr = ["paddleocr>=2.7.0", "paddlepaddle>=2.5.0", "python-Levenshtein>=0.21.0"]
+ocr = ["easyocr>=1.7.0"]
 data = ["datasets>=2.14.0"]
 wandb = ["wandb"]
 dev = [

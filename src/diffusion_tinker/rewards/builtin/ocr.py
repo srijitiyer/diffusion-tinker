@@ -1,9 +1,9 @@
-"""OCR reward - text accuracy via PaddleOCR edit distance.
+"""OCR reward - text accuracy via edit distance.
 
 Extracts target text from the prompt (between double quotes), runs OCR on the
 generated image, and returns 1 - edit_distance / target_length.
 
-Requires: pip install paddleocr paddlepaddle python-Levenshtein
+Supports EasyOCR (preferred, pip install easyocr) or PaddleOCR as fallback.
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ def _extract_quoted_text(prompt: str) -> str:
     match = re.search(r'"([^"]+)"', prompt)
     if match:
         return match.group(1)
-    # Fallback: try single quotes
     match = re.search(r"'([^']+)'", prompt)
     if match:
         return match.group(1)
@@ -37,7 +36,6 @@ def _edit_distance(s1: str, s2: str) -> int:
 
         return distance(s1, s2)
     except ImportError:
-        # Fallback: simple DP implementation
         m, n = len(s1), len(s2)
         dp = list(range(n + 1))
         for i in range(1, m + 1):
@@ -55,55 +53,81 @@ def _edit_distance(s1: str, s2: str) -> int:
 
 @register_reward("ocr")
 class OCRReward(BaseReward):
-    """OCR accuracy reward using PaddleOCR.
+    """OCR accuracy reward.
 
-    The prompt must contain the target text in double quotes, e.g.:
-        "a sign that says \"Hello World\""
+    Uses EasyOCR (preferred) or PaddleOCR. The prompt must contain
+    the target text in double quotes, e.g.:
+        'A sign that says "Hello World"'
     """
 
     name = "ocr"
 
     def __init__(self, device: str = "cpu", dtype: torch.dtype = torch.float32):
         super().__init__(device=device, dtype=dtype)
-        self._ocr = None
+        self._reader = None
+        self._backend = None
 
     def _ensure_loaded(self):
-        if self._ocr is not None:
+        if self._reader is not None:
             return
-        from paddleocr import PaddleOCR
 
+        # Try EasyOCR first (works with PyTorch, no conflicts)
         try:
-            self._ocr = PaddleOCR(use_angle_cls=False, lang="en", use_gpu=False, show_log=False)
-        except (TypeError, ValueError):
-            # Newer PaddleOCR removed show_log and use_angle_cls params
-            self._ocr = PaddleOCR(lang="en", use_gpu=False)
+            import easyocr
 
-    def _score_single(self, image, target: str) -> float:
-        if not target:
-            return 0.0
+            self._reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+            self._backend = "easyocr"
+            return
+        except ImportError:
+            pass
 
+        # Fall back to PaddleOCR
+        try:
+            from paddleocr import PaddleOCR
+
+            try:
+                self._reader = PaddleOCR(use_angle_cls=False, lang="en", use_gpu=False, show_log=False)
+            except (TypeError, ValueError):
+                self._reader = PaddleOCR(lang="en")
+            self._backend = "paddleocr"
+            return
+        except ImportError:
+            pass
+
+        raise ImportError("OCR reward requires easyocr or paddleocr. Install with: pip install easyocr")
+
+    def _ocr_image(self, image) -> str:
+        """Run OCR and return concatenated recognized text."""
         img_array = np.array(image)
-        results = self._ocr.ocr(img_array, cls=False)
 
-        # Concatenate all recognized text
+        if self._backend == "easyocr":
+            results = self._reader.readtext(img_array, detail=0)
+            return "".join(results)
+
+        # PaddleOCR
+        results = self._reader.ocr(img_array, cls=False)
         recognized = ""
         if results and results[0]:
             for line in results[0]:
                 if line and len(line) >= 2 and line[1]:
                     recognized += line[1][0]
+        return recognized
 
-        # Normalize for comparison
+    def _score_single(self, image, target: str) -> float:
+        if not target:
+            return 0.0
+
+        recognized = self._ocr_image(image)
+
         recognized_norm = recognized.replace(" ", "").lower()
         target_norm = target.replace(" ", "").lower()
 
         if not target_norm:
             return 0.0
 
-        # Exact substring match gives full score
         if target_norm in recognized_norm:
             return 1.0
 
-        # Otherwise use edit distance
         dist = _edit_distance(recognized_norm, target_norm)
         return max(0.0, 1.0 - dist / len(target_norm))
 
