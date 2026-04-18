@@ -30,8 +30,14 @@ def main():
 
     from diffusion_tinker import DDRLConfig, DDRLTrainer
 
+    # DDRL theory requires a data-regularization anchor (p_data). Without a
+    # train_dataset, the monotonic transform -exp(-x) makes every advantage
+    # negative and PPO drifts the model without direction. Disable the transform
+    # and use wider clip range so this reduces to standard GRPO, which is the
+    # right algorithm when there is no data anchor.
     config = DDRLConfig(
         data_beta=0.0,
+        use_monotonic_transform=False,
         num_samples_per_prompt=2,
         num_inference_steps=28,
         num_eval_inference_steps=28,
@@ -41,7 +47,7 @@ def main():
         learning_rate=1e-4,
         lora_rank=32,
         lora_alpha=64,
-        clip_range=1e-4,
+        clip_range=0.2,
         num_epochs=60,
         save_every=20,
         eval_every=10,
