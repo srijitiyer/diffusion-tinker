@@ -204,8 +204,11 @@ class BaseDiffusionTrainer(ABC):
             # 2. Compute advantages
             trajectory = self._compute_advantages(trajectory)
 
-            # 3. Filter zero-advantage samples
-            nonzero_mask = trajectory.advantages.abs() > 1e-8
+            # 3. Filter zero-advantage samples. Use raw (pre-transform) advantages
+            # when available - DDRL's monotonic transform maps 0 to -1, so every
+            # post-transform advantage is nonzero even in degenerate cases.
+            adv_for_filter = getattr(trajectory, "_raw_advantages", trajectory.advantages)
+            nonzero_mask = adv_for_filter.abs() > 1e-8
             if nonzero_mask.sum() < 2:
                 print(f"Epoch {epoch}: all advantages are zero, skipping")
                 continue

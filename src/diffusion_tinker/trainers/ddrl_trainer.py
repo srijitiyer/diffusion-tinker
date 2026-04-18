@@ -109,8 +109,14 @@ class DDRLTrainer(BaseDiffusionTrainer):
         The -exp(-x) transform (Theorem 3.1) ensures the optimal policy takes the
         Boltzmann form p* ~ p_data * exp(r/beta).
         """
-        advantages = self.stat_tracker.update(trajectory.prompts, trajectory.rewards)
+        raw_advantages = self.stat_tracker.update(trajectory.prompts, trajectory.rewards)
 
+        # Store raw (pre-transform) advantages so the base-trainer zero-advantage
+        # filter works correctly. After -exp(-x), every value is nonzero even when
+        # the raw advantage was exactly 0, which masks the degenerate case.
+        trajectory._raw_advantages = raw_advantages
+
+        advantages = raw_advantages
         if self.config.beta_temp != 1.0:
             advantages = advantages / self.config.beta_temp
 
@@ -129,12 +135,10 @@ class DDRLTrainer(BaseDiffusionTrainer):
 
         trajectory = trajectory.to(device)
 
-        # Check for learning signal. If every prompt group has zero reward variance,
-        # per-group normalized advantages are all zero. After the monotonic transform
-        # they become -1 uniformly, which pushes the model away from its trajectory
-        # with no signal - destructive. Skip RL update and only run data loss (anchor).
-        reward_std = trajectory.rewards.std().item() if trajectory.rewards is not None else 0.0
-        has_signal = reward_std > 1e-6
+        # Learning signal is present when advantages are not all identical.
+        # The base-trainer filter already skips the epoch entirely if raw
+        # advantages are all zero. This is a belt-and-suspenders check.
+        has_signal = trajectory.advantages is not None and trajectory.advantages.std().item() > 1e-6
 
         num_steps = trajectory.log_probs.shape[1]
 
