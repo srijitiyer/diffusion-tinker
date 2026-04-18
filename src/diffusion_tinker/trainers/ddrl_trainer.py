@@ -162,6 +162,8 @@ class DDRLTrainer(BaseDiffusionTrainer):
 
             # === RL LOSS ===
             if has_signal:
+                # Match rollout: last step uses noise_level=0.0 to avoid sigma_next~0 blowup
+                step_noise_level = config.noise_level if j < num_steps - 1 else 0.0
                 with torch.autocast(device_type=device.type, dtype=autocast_dtype):
                     log_prob_new, prev_sample_mean = sd3_replay_step(
                         transformer=self.transformer,
@@ -172,7 +174,9 @@ class DDRLTrainer(BaseDiffusionTrainer):
                         prompt_embeds=trajectory.prompt_embeds,
                         pooled_embeds=trajectory.pooled_embeds,
                         guidance_scale=config.guidance_scale,
-                        noise_level=config.noise_level,
+                        noise_level=step_noise_level,
+                        negative_prompt_embeds=trajectory.negative_prompt_embeds,
+                        negative_pooled_embeds=trajectory.negative_pooled_embeds,
                     )
 
                 log_prob_old = trajectory.log_probs[:, j]

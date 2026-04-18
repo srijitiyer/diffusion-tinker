@@ -52,6 +52,8 @@ class SD3SamplingOutput:
     timesteps: torch.Tensor  # (T+1,) - full sigma schedule (includes terminal sigma=0)
     prompt_embeds: torch.Tensor  # (B, seq_len, dim)
     pooled_embeds: torch.Tensor  # (B, pooled_dim)
+    negative_prompt_embeds: torch.Tensor | None = None
+    negative_pooled_embeds: torch.Tensor | None = None
 
 
 @torch.no_grad()
@@ -196,6 +198,8 @@ def sd3_sample_with_logprob(
         timesteps=sigmas.cpu(),  # Full sigma schedule (T+1,) so we can look up sigma_next
         prompt_embeds=prompt_embeds.detach().cpu(),
         pooled_embeds=pooled_prompt_embeds.detach().cpu(),
+        negative_prompt_embeds=negative_prompt_embeds.detach().cpu() if do_cfg else None,
+        negative_pooled_embeds=negative_pooled_prompt_embeds.detach().cpu() if do_cfg else None,
     )
 
 

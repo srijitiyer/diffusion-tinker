@@ -28,6 +28,8 @@ class TrajectoryBatch:
     prompt_embeds: torch.Tensor
     pooled_embeds: torch.Tensor
     prompts: list[str]
+    negative_prompt_embeds: torch.Tensor | None = None
+    negative_pooled_embeds: torch.Tensor | None = None
     rewards: torch.Tensor | None = None
     advantages: torch.Tensor | None = None
     images: list[Image.Image] = field(default_factory=list)
@@ -58,6 +60,10 @@ class TrajectoryBatch:
         self.timesteps = self.timesteps.to(device)
         self.prompt_embeds = self.prompt_embeds.to(device)
         self.pooled_embeds = self.pooled_embeds.to(device)
+        if self.negative_prompt_embeds is not None:
+            self.negative_prompt_embeds = self.negative_prompt_embeds.to(device)
+        if self.negative_pooled_embeds is not None:
+            self.negative_pooled_embeds = self.negative_pooled_embeds.to(device)
         if self.rewards is not None:
             self.rewards = self.rewards.to(device)
         if self.advantages is not None:

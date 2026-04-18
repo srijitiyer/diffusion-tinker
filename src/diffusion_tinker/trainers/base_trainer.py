@@ -146,6 +146,7 @@ class BaseDiffusionTrainer(ABC):
             all_outputs.append(output)
 
         # Concatenate all mini-batch outputs
+        has_neg = all_outputs[0].negative_prompt_embeds is not None
         trajectory = TrajectoryBatch(
             latents=torch.cat([o.latents_trajectory for o in all_outputs], dim=0),
             next_latents=torch.cat([o.next_latents_trajectory for o in all_outputs], dim=0),
@@ -153,6 +154,8 @@ class BaseDiffusionTrainer(ABC):
             timesteps=all_outputs[0].timesteps,  # Same schedule for all batches
             prompt_embeds=torch.cat([o.prompt_embeds for o in all_outputs], dim=0),
             pooled_embeds=torch.cat([o.pooled_embeds for o in all_outputs], dim=0),
+            negative_prompt_embeds=torch.cat([o.negative_prompt_embeds for o in all_outputs], dim=0) if has_neg else None,
+            negative_pooled_embeds=torch.cat([o.negative_pooled_embeds for o in all_outputs], dim=0) if has_neg else None,
             prompts=expanded_prompts,
             rewards=None,
             images=[img for o in all_outputs for img in o.images],
