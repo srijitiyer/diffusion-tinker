@@ -39,13 +39,22 @@ def main():
     ocr = resolve_reward("ocr", device="cpu")
 
     configs = [
-        ("noise_0.0", 10, 0.0),
-        ("noise_0.1", 10, 0.1),
-        ("noise_0.2", 10, 0.2),
-        ("noise_0.3", 10, 0.3),
-        ("noise_0.5", 10, 0.5),
-        ("noise_0.7", 10, 0.7),
+        ("s10_n0.0", 10, 0.0),
+        ("s20_n0.3", 20, 0.3),
+        ("s20_n0.5", 20, 0.5),
+        ("s28_n0.1", 28, 0.1),
+        ("s28_n0.3", 28, 0.3),
+        ("s28_n0.5", 28, 0.5),
+        ("s28_n0.7", 28, 0.7),
+        ("s40_n0.5", 40, 0.5),
+        ("s40_n0.7", 40, 0.7),
     ]
+
+    # Also dump the sigma schedule so we can see what shift is being applied
+    pipeline.scheduler.set_timesteps(10, device="cuda")
+    print(f"\nSigma schedule at 10 steps: {pipeline.scheduler.sigmas.tolist()}")
+    pipeline.scheduler.set_timesteps(28, device="cuda")
+    print(f"Sigma schedule at 28 steps: {pipeline.scheduler.sigmas.tolist()}\n")
 
     results = {}
     for label, steps, noise in configs:
