@@ -55,10 +55,12 @@ class DDRLTrainer(BaseDiffusionTrainer):
             if self.config.data_beta > 0:
                 warnings.warn(
                     "data_beta > 0 but no train_dataset provided. "
-                    "Falling back to trajectory endpoints for data loss (less effective). "
-                    "Set train_dataset to a HF dataset or image folder for proper DDRL.",
+                    "Disabling data loss term - using trajectory endpoints creates a "
+                    "self-distillation feedback loop that reinforces the current (bad) policy. "
+                    "For proper DDRL, set train_dataset to a HF dataset or image folder.",
                     stacklevel=2,
                 )
+                self.config.data_beta = 0.0
             return
 
         print(f"Loading data for DDRL forward KL: {self.config.train_dataset}...")
@@ -127,6 +129,13 @@ class DDRLTrainer(BaseDiffusionTrainer):
 
         trajectory = trajectory.to(device)
 
+        # Check for learning signal. If every prompt group has zero reward variance,
+        # per-group normalized advantages are all zero. After the monotonic transform
+        # they become -1 uniformly, which pushes the model away from its trajectory
+        # with no signal - destructive. Skip RL update and only run data loss (anchor).
+        reward_std = trajectory.rewards.std().item() if trajectory.rewards is not None else 0.0
+        has_signal = reward_std > 1e-6
+
         num_steps = trajectory.log_probs.shape[1]
 
         total_rl_loss = 0.0
@@ -152,26 +161,30 @@ class DDRLTrainer(BaseDiffusionTrainer):
             next_latent_t = trajectory.next_latents[:, j]
 
             # === RL LOSS ===
-            with torch.autocast(device_type=device.type, dtype=autocast_dtype):
-                log_prob_new, prev_sample_mean = sd3_replay_step(
-                    transformer=self.transformer,
-                    latent_t=latent_t,
-                    next_latent_t=next_latent_t,
-                    sigma=sigma,
-                    sigma_next=sigma_next,
-                    prompt_embeds=trajectory.prompt_embeds,
-                    pooled_embeds=trajectory.pooled_embeds,
-                    guidance_scale=config.guidance_scale,
-                    noise_level=config.noise_level,
-                )
+            if has_signal:
+                with torch.autocast(device_type=device.type, dtype=autocast_dtype):
+                    log_prob_new, prev_sample_mean = sd3_replay_step(
+                        transformer=self.transformer,
+                        latent_t=latent_t,
+                        next_latent_t=next_latent_t,
+                        sigma=sigma,
+                        sigma_next=sigma_next,
+                        prompt_embeds=trajectory.prompt_embeds,
+                        pooled_embeds=trajectory.pooled_embeds,
+                        guidance_scale=config.guidance_scale,
+                        noise_level=config.noise_level,
+                    )
 
-            log_prob_old = trajectory.log_probs[:, j]
-            ratio = torch.exp(log_prob_new.float() - log_prob_old.float())
+                log_prob_old = trajectory.log_probs[:, j]
+                ratio = torch.exp(log_prob_new.float() - log_prob_old.float())
 
-            advantages = trajectory.advantages
-            unclipped = -advantages * ratio
-            clipped = -advantages * torch.clamp(ratio, 1.0 - config.clip_range, 1.0 + config.clip_range)
-            rl_loss = torch.mean(torch.maximum(unclipped, clipped))
+                advantages = trajectory.advantages
+                unclipped = -advantages * ratio
+                clipped = -advantages * torch.clamp(ratio, 1.0 - config.clip_range, 1.0 + config.clip_range)
+                rl_loss = torch.mean(torch.maximum(unclipped, clipped))
+            else:
+                rl_loss = torch.tensor(0.0, device=device)
+                ratio = torch.tensor(1.0, device=device)
 
             # === DATA LOSS (forward KL = standard denoising loss) ===
             data_loss = torch.tensor(0.0, device=device)
@@ -179,12 +192,11 @@ class DDRLTrainer(BaseDiffusionTrainer):
                 u = torch.normal(mean=config.logit_mean, std=config.logit_std, size=(batch_size,), device=device)
                 t = torch.sigmoid(u)
 
-                # Use real data latents if available, otherwise fall back to trajectory endpoints
-                if self._data_latents is not None:
-                    data_idx = torch.randint(0, len(self._data_latents), (batch_size,))
-                    clean_latents = self._data_latents[data_idx].to(device, dtype=autocast_dtype)
-                else:
-                    clean_latents = trajectory.next_latents[:, -1]
+                # Real data latents required - self-distillation fallback was removed
+                # because it reinforces whatever (bad) policy the model currently has.
+                assert self._data_latents is not None, "data_beta > 0 requires train_dataset"
+                data_idx = torch.randint(0, len(self._data_latents), (batch_size,))
+                clean_latents = self._data_latents[data_idx].to(device, dtype=autocast_dtype)
 
                 noise = torch.randn_like(clean_latents)
                 dropout_mask = torch.rand(batch_size, device=device) < config.condition_dropout
@@ -203,7 +215,8 @@ class DDRLTrainer(BaseDiffusionTrainer):
             # === COMBINED LOSS ===
             loss = rl_loss + config.data_beta * data_loss
             loss = loss / len(timestep_indices)
-            loss.backward()
+            if loss.requires_grad:
+                loss.backward()
 
             total_rl_loss += rl_loss.item()
             total_data_loss += data_loss.item() if isinstance(data_loss, torch.Tensor) else data_loss
