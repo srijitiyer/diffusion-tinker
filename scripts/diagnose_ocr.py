@@ -39,10 +39,12 @@ def main():
     ocr = resolve_reward("ocr", device="cpu")
 
     configs = [
-        ("train_settings", 10, 0.7),
-        ("eval_settings", 28, 0.0),
-        ("train_steps_no_noise", 10, 0.0),
-        ("eval_steps_with_noise", 28, 0.7),
+        ("noise_0.0", 10, 0.0),
+        ("noise_0.1", 10, 0.1),
+        ("noise_0.2", 10, 0.2),
+        ("noise_0.3", 10, 0.3),
+        ("noise_0.5", 10, 0.5),
+        ("noise_0.7", 10, 0.7),
     ]
 
     results = {}
