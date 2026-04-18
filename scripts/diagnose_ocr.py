@@ -22,7 +22,7 @@ PROMPTS = [
 
 
 def main():
-    out_dir = "/workspace/ocr_diagnostic"
+    out_dir = os.environ.get("OUTPUT_DIR", "/workspace/ocr_diagnostic")
     os.makedirs(out_dir, exist_ok=True)
 
     from diffusers import StableDiffusion3Pipeline
