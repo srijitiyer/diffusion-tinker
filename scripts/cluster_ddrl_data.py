@@ -26,11 +26,15 @@ def main():
 
     from diffusion_tinker import DDRLConfig, DDRLTrainer
 
+    # monotonic transform OFF: the transform makes all advantages negative,
+    # which combined with data_loss pulls toward the dataset distribution
+    # instead of improving the reward. Without transform, advantages are
+    # properly signed and the data_loss just prevents drift.
     config = DDRLConfig(
         data_beta=0.01,
         train_dataset='lambdalabs/naruto-blip-captions',
         image_column='image',
-        use_monotonic_transform=True,
+        use_monotonic_transform=False,
         num_samples_per_prompt=2,
         num_epochs=60,
         save_every=20,
