@@ -1,11 +1,15 @@
-"""DDRL + SD3.5-Medium + Aesthetic Reward - Demo Script
+"""DDRL + SD3.5-Medium + Aesthetic Reward
 
-Train a diffusion model to generate more aesthetically pleasing images
-using DDRL (Data-regularized Reinforcement Learning).
+Train SD3.5-Medium to generate more aesthetically pleasing images using DDRL.
+
+DDRL requires a real image dataset for its forward KL data-regularization term.
+Without it, the model drifts from the base policy and eventually collapses.
+Here we use yuvalkirstain/pickapic_v2 as the anchor dataset.
 
 Requirements:
-    pip install -e ".[rewards]"
-    GPU with >= 24GB VRAM (A100, RTX 4090)
+    pip install diffusion-tinker[data]
+    GPU with >= 24GB VRAM (A5000, A6000, A100)
+    HF_TOKEN env var set (for gated SD3.5 model)
 """
 
 from diffusion_tinker import DDRLConfig, DDRLTrainer
@@ -19,34 +23,20 @@ prompts = [
     "a photograph of a cozy library with warm lighting",
     "an illustration of a forest path in autumn",
     "a photograph of ocean waves crashing on rocks",
-    "a digital art piece of a futuristic cityscape",
-    "a photograph of a starry night sky over a desert",
-    "a painting of a mountain village at sunrise",
-    "a photograph of a field of sunflowers",
-    "an artistic photograph of light through stained glass",
-    "a photograph of a misty forest in the morning",
-    "a painting of a Japanese garden in spring",
-    "a photograph of northern lights over a frozen lake",
 ]
 
 config = DDRLConfig(
+    # DDRL-specific: forward KL regularization anchored to real images
     data_beta=0.01,
-    num_samples_per_prompt=4,
-    num_inference_steps=10,
-    num_eval_inference_steps=28,
-    guidance_scale=7.0,
-    noise_level=0.7,
-    resolution=512,
-    learning_rate=1e-4,
-    lora_rank=32,
-    lora_alpha=64,
-    clip_range=1e-4,
+    train_dataset="yuvalkirstain/pickapic_v2",
+    use_monotonic_transform=True,
+    condition_dropout=0.2,
+    # Training
     num_epochs=50,
     save_every=10,
     eval_every=5,
+    early_stop_patience=3,
     output_dir="./ddrl_aesthetic_output",
-    gradient_checkpointing=True,
-    mixed_precision="bf16",
 )
 
 trainer = DDRLTrainer(
