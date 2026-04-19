@@ -69,6 +69,9 @@ class BaseDiffusionTrainer(ABC):
             weight_decay=config.weight_decay,
         )
 
+        self._best_eval_reward = -float("inf")
+        self._evals_without_improvement = 0
+
         print(f"Trainable params: {sum(p.numel() for p in trainable_params):,}")
         print(f"Total params: {sum(p.numel() for p in self.transformer.parameters()):,}")
 
@@ -224,6 +227,14 @@ class BaseDiffusionTrainer(ABC):
                 log_str = f"Epoch {epoch} | reward={mean_reward:.3f}"
                 for k, v in metrics.items():
                     log_str += f" | {k}={v:.4f}"
+
+                unique_prompts = list(dict.fromkeys(trajectory.prompts))
+                per_prompt_rewards = []
+                for p in unique_prompts:
+                    idxs = [i for i, tp in enumerate(trajectory.prompts) if tp == p]
+                    pr = trajectory.rewards[idxs].mean().item()
+                    per_prompt_rewards.append(f"{p[:15]}={pr:.2f}")
+                log_str += f" | per_prompt=[{', '.join(per_prompt_rewards)}]"
                 print(log_str)
 
             # 6. Save checkpoint
@@ -233,6 +244,16 @@ class BaseDiffusionTrainer(ABC):
             # 7. Eval
             if epoch > 0 and epoch % self.config.eval_every == 0:
                 self._evaluate(epoch)
+
+                if (
+                    self.config.early_stop_patience > 0
+                    and self._evals_without_improvement >= self.config.early_stop_patience
+                ):
+                    print(
+                        f"Early stopping: no eval improvement for {self.config.early_stop_patience} evals "
+                        f"(best={self._best_eval_reward:.3f})"
+                    )
+                    break
 
         # Final save
         self._save_checkpoint(self.config.num_epochs)
@@ -246,8 +267,8 @@ class BaseDiffusionTrainer(ABC):
         print(f"Saved checkpoint to {save_path}")
 
     @torch.no_grad()
-    def _evaluate(self, epoch: int):
-        """Generate eval images and compute reward stats."""
+    def _evaluate(self, epoch: int) -> float:
+        """Generate eval images and compute reward stats. Returns mean reward."""
         self.transformer.eval()
         eval_prompts = self.train_prompts[:4]
 
@@ -256,18 +277,32 @@ class BaseDiffusionTrainer(ABC):
             prompts=eval_prompts,
             num_inference_steps=self.config.num_eval_inference_steps,
             guidance_scale=self.config.guidance_scale,
-            noise_level=0.0,  # deterministic ODE for eval
+            noise_level=0.0,
             height=self.config.resolution,
             width=self.config.resolution,
         )
 
         ctx = RewardContext(images=output.images, prompts=eval_prompts, device=self.device)
         reward_output = self.reward_fn(ctx)
-        mean_reward = reward_output.scores.mean().item()
-        print(f"Eval (epoch {epoch}): mean_reward={mean_reward:.3f}")
+        scores = reward_output.scores
+        mean_reward = scores.mean().item()
 
-        # Save sample images
+        per_prompt = " | ".join(f"{p[:20]}={s:.2f}" for p, s in zip(eval_prompts, scores.tolist()))
+        print(f"Eval (epoch {epoch}): mean_reward={mean_reward:.3f} [{per_prompt}]")
+
         eval_dir = Path(self.config.output_dir) / f"eval-{epoch}"
         eval_dir.mkdir(parents=True, exist_ok=True)
         for i, img in enumerate(output.images):
             img.save(eval_dir / f"sample_{i}.png")
+
+        if self.config.save_best and mean_reward > self._best_eval_reward:
+            self._best_eval_reward = mean_reward
+            self._evals_without_improvement = 0
+            best_path = Path(self.config.output_dir) / "checkpoint-best"
+            best_path.mkdir(parents=True, exist_ok=True)
+            self.transformer.save_pretrained(str(best_path))
+            print(f"New best eval reward: {mean_reward:.3f} (saved to {best_path})")
+        else:
+            self._evals_without_improvement += 1
+
+        return mean_reward

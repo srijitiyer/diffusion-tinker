@@ -23,15 +23,15 @@ class BaseDiffusionConfig:
     log_every: int = 1
 
     # Sampling / rollout
-    num_samples_per_prompt: int = 8
-    num_inference_steps: int = 10
+    num_samples_per_prompt: int = 4
+    num_inference_steps: int = 28
     num_eval_inference_steps: int = 28
     guidance_scale: float = 7.0
-    noise_level: float = 0.7
+    noise_level: float = 0.1
     resolution: int = 512
 
     # RL
-    clip_range: float = 1e-4
+    clip_range: float = 0.2
     adv_clip_max: float = 5.0
 
     # Memory
@@ -41,3 +41,5 @@ class BaseDiffusionConfig:
     # Output
     output_dir: str = "./output"
     seed: int = 42
+    save_best: bool = True
+    early_stop_patience: int = 0  # 0 = disabled, N = stop after N evals with no improvement

@@ -32,7 +32,7 @@ class DDRLConfig(BaseDiffusionConfig):
     logit_std: float = 1.0
 
     # Data for forward KL regularization (denoising loss)
-    # If None, falls back to using trajectory endpoints (less effective)
+    # Required when data_beta > 0. Without a real dataset, data_beta is auto-disabled.
     train_dataset: str | None = None  # HF dataset name or local image folder path
     dataset_split: str = "train"
     image_column: str = "image"
