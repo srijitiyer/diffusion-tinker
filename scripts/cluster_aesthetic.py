@@ -16,10 +16,6 @@ PROMPTS = [
     "a portrait of a cat sitting on a windowsill",
     "an oil painting of a city street in the rain",
     "a macro photograph of a flower with morning dew",
-    "a watercolor painting of a sailboat on calm water",
-    "a photograph of a cozy library with warm lighting",
-    "an illustration of a forest path in autumn",
-    "a photograph of ocean waves crashing on rocks",
 ]
 
 
