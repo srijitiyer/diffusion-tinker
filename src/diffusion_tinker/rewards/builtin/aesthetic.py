@@ -1,11 +1,4 @@
-"""Aesthetic score predictor reward.
-
-Architecture: CLIP-ViT-L/14 image features -> 5-layer MLP -> scalar score.
-Trained on the AVA dataset with SAC+LOGOS augmentation.
-Output range: roughly 1-10 (AVA aesthetic ratings).
-
-Reference: REWARD_MODELS_TECHNICAL.md Section 2
-"""
+"""Aesthetic score reward (CLIP-ViT-L/14 + MLP, output ~1-10)."""
 
 from __future__ import annotations
 

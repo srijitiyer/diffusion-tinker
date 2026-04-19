@@ -1,14 +1,4 @@
-"""DDRL Trainer - Data-regularized Reinforcement Learning for Diffusion Models.
-
-Implements the DDRL algorithm from arXiv:2512.04332 (Haotian Ye et al.).
-
-Key innovation: replaces reverse KL (which breaks under distribution shift) with
-forward KL, which reduces to the standard diffusion denoising loss. Combined loss:
-
-    L = L_RL + data_beta * L_data
-
-where L_RL is the clipped policy gradient and L_data is the standard denoising loss.
-"""
+"""DDRL Trainer (arXiv:2512.04332)."""
 
 from __future__ import annotations
 
@@ -28,19 +18,6 @@ from diffusion_tinker.trainers.ddrl_config import DDRLConfig
 
 
 class DDRLTrainer(BaseDiffusionTrainer):
-    """Trainer implementing DDRL (Data-regularized RL for Diffusion Models).
-
-    Usage:
-        from diffusion_tinker import DDRLTrainer, DDRLConfig
-
-        trainer = DDRLTrainer(
-            model="stabilityai/stable-diffusion-3.5-medium",
-            reward_funcs="aesthetic",
-            train_prompts=["a photo of a cat", "a sunset over mountains"],
-            config=DDRLConfig(data_beta=0.01, train_dataset="laion/laion-art"),
-        )
-        trainer.train()
-    """
 
     config: DDRLConfig
 
@@ -50,7 +27,6 @@ class DDRLTrainer(BaseDiffusionTrainer):
         self._setup_data()
 
     def _setup_data(self):
-        """Load and pre-encode dataset images for the forward KL data loss."""
         if self.config.train_dataset is None:
             if self.config.data_beta > 0:
                 warnings.warn(
@@ -104,16 +80,9 @@ class DDRLTrainer(BaseDiffusionTrainer):
         print(f"  Cached {len(self._data_latents)} latents ({self._data_latents.nbytes / 1e6:.0f} MB)")
 
     def _compute_advantages(self, trajectory: TrajectoryBatch) -> TrajectoryBatch:
-        """DDRL advantage computation with monotonic transform.
-
-        The -exp(-x) transform (Theorem 3.1) ensures the optimal policy takes the
-        Boltzmann form p* ~ p_data * exp(r/beta).
-        """
         raw_advantages = self.stat_tracker.update(trajectory.prompts, trajectory.rewards)
 
-        # Store raw (pre-transform) advantages so the base-trainer zero-advantage
-        # filter works correctly. After -exp(-x), every value is nonzero even when
-        # the raw advantage was exactly 0, which masks the degenerate case.
+        # raw advantages needed for the zero-signal filter in base_trainer
         trajectory._raw_advantages = raw_advantages
 
         advantages = raw_advantages
@@ -128,16 +97,12 @@ class DDRLTrainer(BaseDiffusionTrainer):
         return trajectory
 
     def _training_step(self, trajectory: TrajectoryBatch) -> dict[str, float]:
-        """DDRL training step: L = L_RL + data_beta * L_data."""
         device = self.device
         config = self.config
         batch_size = len(trajectory)
 
         trajectory = trajectory.to(device)
 
-        # Learning signal is present when advantages are not all identical.
-        # The base-trainer filter already skips the epoch entirely if raw
-        # advantages are all zero. This is a belt-and-suspenders check.
         has_signal = trajectory.advantages is not None and trajectory.advantages.std().item() > 1e-6
 
         num_steps = trajectory.log_probs.shape[1]
@@ -164,9 +129,7 @@ class DDRLTrainer(BaseDiffusionTrainer):
             latent_t = trajectory.latents[:, j]
             next_latent_t = trajectory.next_latents[:, j]
 
-            # === RL LOSS ===
             if has_signal:
-                # Match rollout: last step uses noise_level=0.0 to avoid sigma_next~0 blowup
                 step_noise_level = config.noise_level if j < num_steps - 1 else 0.0
                 with torch.autocast(device_type=device.type, dtype=autocast_dtype):
                     log_prob_new, prev_sample_mean = sd3_replay_step(
@@ -194,14 +157,11 @@ class DDRLTrainer(BaseDiffusionTrainer):
                 rl_loss = torch.tensor(0.0, device=device)
                 ratio = torch.tensor(1.0, device=device)
 
-            # === DATA LOSS (forward KL = standard denoising loss) ===
             data_loss = torch.tensor(0.0, device=device)
             if config.data_beta > 0:
                 u = torch.normal(mean=config.logit_mean, std=config.logit_std, size=(batch_size,), device=device)
                 t = torch.sigmoid(u)
 
-                # Real data latents required - self-distillation fallback was removed
-                # because it reinforces whatever (bad) policy the model currently has.
                 assert self._data_latents is not None, "data_beta > 0 requires train_dataset"
                 data_idx = torch.randint(0, len(self._data_latents), (batch_size,))
                 clean_latents = self._data_latents[data_idx].to(device, dtype=autocast_dtype)
@@ -220,7 +180,6 @@ class DDRLTrainer(BaseDiffusionTrainer):
                         condition_dropout_mask=dropout_mask,
                     )
 
-            # === COMBINED LOSS ===
             loss = rl_loss + config.data_beta * data_loss
             loss = loss / len(timestep_indices)
             if loss.requires_grad:

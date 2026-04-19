@@ -1,8 +1,4 @@
-"""CLIP Score reward - cosine similarity between CLIP text and image embeddings.
-
-Uses openai/clip-vit-large-patch14. Output is the per-sample diagonal of the
-similarity matrix, normalized by a factor (default 100, matching torchmetrics convention).
-"""
+"""CLIP score reward (cosine similarity, CLIP-ViT-L/14)."""
 
 from __future__ import annotations
 

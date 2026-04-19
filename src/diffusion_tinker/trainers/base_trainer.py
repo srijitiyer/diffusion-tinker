@@ -1,11 +1,4 @@
-"""Base trainer for diffusion RL methods.
-
-Orchestrates the lifecycle: model loading, LoRA setup, sampling, reward
-computation, advantage estimation, and the training loop. Algorithm-specific
-trainers override `_training_step()`.
-
-Reference: TRAINING_LOOP_INTERNALS.md
-"""
+"""Base trainer for diffusion RL methods."""
 
 from __future__ import annotations
 
@@ -201,27 +194,21 @@ class BaseDiffusionTrainer(ABC):
             # so total images = len(prompts) * num_samples_per_prompt.
             batch_prompts = epoch_prompts
 
-            # 1. Sample trajectories (no_grad)
             trajectory = self._sample_trajectories(batch_prompts)
 
-            # 2. Compute advantages
             trajectory = self._compute_advantages(trajectory)
 
-            # 3. Filter zero-advantage samples. Use raw (pre-transform) advantages
-            # when available - DDRL's monotonic transform maps 0 to -1, so every
-            # post-transform advantage is nonzero even in degenerate cases.
+            # use raw advantages for filter (DDRL's -exp(-x) maps 0 to -1)
             adv_for_filter = getattr(trajectory, "_raw_advantages", trajectory.advantages)
             nonzero_mask = adv_for_filter.abs() > 1e-8
             if nonzero_mask.sum() < 2:
                 print(f"Epoch {epoch}: all advantages are zero, skipping")
                 continue
 
-            # 4. Training step (algorithm-specific)
             self.transformer.train()
             metrics = self._training_step(trajectory)
             self.global_step += 1
 
-            # 5. Log
             if epoch % self.config.log_every == 0:
                 mean_reward = trajectory.rewards.mean().item()
                 log_str = f"Epoch {epoch} | reward={mean_reward:.3f}"
@@ -237,11 +224,9 @@ class BaseDiffusionTrainer(ABC):
                 log_str += f" | per_prompt=[{', '.join(per_prompt_rewards)}]"
                 print(log_str)
 
-            # 6. Save checkpoint
             if epoch > 0 and epoch % self.config.save_every == 0:
                 self._save_checkpoint(epoch)
 
-            # 7. Eval
             if epoch > 0 and epoch % self.config.eval_every == 0:
                 self._evaluate(epoch)
 

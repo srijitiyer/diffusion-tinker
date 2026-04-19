@@ -1,9 +1,4 @@
-"""FlowGRPO Trainer - Flow-based Group Relative Policy Optimization.
-
-Implements FlowGRPO from arXiv:2505.05470. Uses the same SDE sampling and
-log-prob infrastructure as DDRL but with standard GRPO advantages (no monotonic
-transform) and optional reverse KL regularization.
-"""
+"""FlowGRPO Trainer (arXiv:2505.05470)."""
 
 from __future__ import annotations
 
@@ -18,24 +13,10 @@ from diffusion_tinker.trainers.flowgrpo_config import FlowGRPOConfig
 
 
 class FlowGRPOTrainer(BaseDiffusionTrainer):
-    """Trainer implementing FlowGRPO.
-
-    Usage:
-        from diffusion_tinker import FlowGRPOTrainer, FlowGRPOConfig
-
-        trainer = FlowGRPOTrainer(
-            model="stabilityai/stable-diffusion-3.5-medium",
-            reward_funcs="aesthetic",
-            train_prompts=prompts,
-            config=FlowGRPOConfig(kl_beta=0.01),
-        )
-        trainer.train()
-    """
 
     config: FlowGRPOConfig
 
     def _training_step(self, trajectory: TrajectoryBatch) -> dict[str, float]:
-        """FlowGRPO training step: RL loss + optional KL regularization."""
         device = self.device
         config = self.config
 
@@ -43,7 +24,6 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
         has_signal = trajectory.advantages is not None and trajectory.advantages.std().item() > 1e-6
         num_steps = trajectory.log_probs.shape[1]
 
-        # Denoising reduction: optionally train on fewer timesteps
         timestep_indices = list(range(num_steps))
         if config.num_train_timesteps is not None and config.num_train_timesteps < num_steps:
             timestep_indices = sorted(random.sample(timestep_indices, config.num_train_timesteps))
@@ -70,7 +50,6 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
             if not has_signal:
                 continue
 
-            # Current model log-prob
             step_noise_level = config.noise_level if j < num_steps - 1 else 0.0
             with torch.autocast(device_type=device.type, dtype=autocast_dtype):
                 log_prob_new, prev_sample_mean = sd3_replay_step(
@@ -90,20 +69,17 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
             log_prob_old = trajectory.log_probs[:, j]
             ratio = torch.exp(log_prob_new.float() - log_prob_old.float())
 
-            # GRPO-Guard: normalize ratios per group
             if config.use_grpo_guard:
                 ratio = ratio / (ratio.mean() + 1e-8)
 
-            # PPO clipped surrogate loss
             advantages = trajectory.advantages
             unclipped = -advantages * ratio
             clipped = -advantages * torch.clamp(ratio, 1.0 - config.clip_range, 1.0 + config.clip_range)
             rl_loss = torch.mean(torch.maximum(unclipped, clipped))
 
-            # Optional KL regularization with reference model
             kl_loss = torch.tensor(0.0, device=device)
             if config.kl_beta > 0:
-                # Get reference model prediction by disabling LoRA adapter
+                # reference model = base model with LoRA disabled
                 with torch.no_grad():
                     self.transformer.disable_adapter_layers()
                     try:
@@ -124,8 +100,6 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
                     finally:
                         self.transformer.enable_adapter_layers()
 
-                # KL ~ (mean_current - mean_ref)^2 / (2 * noise_std^2)
-                # Compute noise_std from the SDE formula
                 sigma_val = sigma.float().clamp(max=0.9999)
                 dt = (sigma_next - sigma).float()
                 std_dev_t = torch.sqrt(sigma_val / (1.0 - sigma_val)) * config.noise_level

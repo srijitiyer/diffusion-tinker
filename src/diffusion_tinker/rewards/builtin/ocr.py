@@ -1,10 +1,4 @@
-"""OCR reward - text accuracy via edit distance.
-
-Extracts target text from the prompt (between double quotes), runs OCR on the
-generated image, and returns 1 - edit_distance / target_length.
-
-Supports EasyOCR (preferred, pip install easyocr) or PaddleOCR as fallback.
-"""
+"""OCR reward (edit distance between generated text and prompt target)."""
 
 from __future__ import annotations
 

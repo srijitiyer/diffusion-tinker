@@ -1,11 +1,4 @@
-"""SD3 pipeline modification for SDE sampling with log-probability collection.
-
-Patches StableDiffusion3Pipeline to return denoising trajectories and per-step
-log-probabilities, required for policy gradient RL training.
-
-Code reference: FlowGRPO's sd3_pipeline_with_logprob.py
-Math reference: PIPELINE_MODIFICATIONS.md Section 2
-"""
+"""SD3 pipeline with SDE sampling and log-probability collection."""
 
 from __future__ import annotations
 
@@ -87,7 +80,7 @@ def sd3_sample_with_logprob(
     batch_size = len(prompts)
     do_cfg = guidance_scale > 1.0
 
-    # 1. Encode text prompts using all 3 encoders (CLIP-L + CLIP-G + T5-XXL)
+    # encode text
     (
         prompt_embeds,
         negative_prompt_embeds,
@@ -102,7 +95,7 @@ def sd3_sample_with_logprob(
         device=device,
     )
 
-    # 2. Prepare initial noise latents
+    # initial noise
     latent_channels = pipeline.transformer.config.in_channels
     latents = torch.randn(
         (batch_size, latent_channels, height // 8, width // 8),
@@ -111,14 +104,13 @@ def sd3_sample_with_logprob(
         generator=generator,
     )
 
-    # 3. Set up scheduler timesteps
+    # scheduler
     pipeline.scheduler.set_timesteps(num_inference_steps, device=device)
     sigmas = pipeline.scheduler.sigmas  # (T+1,) descending from ~1 to 0
 
-    # Scale initial latents by first sigma
     latents = latents * sigmas[0]
 
-    # 4. Denoising loop with SDE and log-prob collection
+    # denoising loop
     all_latents = []
     all_next_latents = []
     all_log_probs = []
@@ -128,11 +120,8 @@ def sd3_sample_with_logprob(
 
         all_latents.append(latents.detach().cpu())
 
-        # Prepare model input
         latent_model_input = torch.cat([latents] * 2, dim=0) if do_cfg else latents
         sigma_input = sigma.expand(latent_model_input.shape[0])
-
-        # CFG: concatenate conditional + unconditional embeddings
         if do_cfg:
             model_prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
             model_pooled_embeds = torch.cat([negative_pooled_prompt_embeds, pooled_prompt_embeds], dim=0)
@@ -140,7 +129,6 @@ def sd3_sample_with_logprob(
             model_prompt_embeds = prompt_embeds
             model_pooled_embeds = pooled_prompt_embeds
 
-        # Transformer forward pass
         noise_pred = pipeline.transformer(
             hidden_states=latent_model_input,
             timestep=sigma_input * 1000.0,
@@ -149,15 +137,12 @@ def sd3_sample_with_logprob(
             return_dict=False,
         )[0]
 
-        # CFG combination
         if do_cfg:
             noise_pred_uncond, noise_pred_cond = noise_pred.chunk(2)
             noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
 
-        # Skip SDE noise on last step (sigma_next near 0 causes numerical issues)
         step_noise_level = noise_level if i < len(sigmas) - 2 else 0.0
 
-        # SDE step with log-prob
         sigma_batch = sigma.expand(batch_size)
         sigma_next_batch = sigma_next.expand(batch_size)
 
@@ -170,26 +155,17 @@ def sd3_sample_with_logprob(
             generator=generator,
         )
 
-        # Cast back to training dtype
         latents = latents.to(dtype)
 
         all_next_latents.append(latents.detach().cpu())
         all_log_probs.append(log_prob.detach().cpu())
 
-    # 5. VAE decode
     decoded = _decode_latents(pipeline, latents)
-
-    # 6. Convert to PIL images
     images = _tensor_to_pil(decoded)
-
-    # 7. Stack trajectories
     latents_traj = torch.stack(all_latents, dim=1)  # (B, T, C, H, W)
     next_latents_traj = torch.stack(all_next_latents, dim=1)
     log_probs_traj = torch.stack(all_log_probs, dim=1)  # (B, T)
 
-    # Store the conditional (non-negative) embeddings for training replay.
-    # encode_prompt returns separate conditional and negative tensors,
-    # so prompt_embeds already contains only the conditional embeddings.
     return SD3SamplingOutput(
         images=images,
         latents_trajectory=latents_traj,
@@ -237,7 +213,6 @@ def sd3_replay_step(
     batch_size = latent_t.shape[0]
     do_cfg = guidance_scale > 1.0
 
-    # Prepare model input
     if do_cfg:
         if negative_prompt_embeds is None:
             negative_prompt_embeds = torch.zeros_like(prompt_embeds)
@@ -254,7 +229,6 @@ def sd3_replay_step(
         model_pooled_embeds = pooled_embeds
         sigma_input = sigma.expand(batch_size)
 
-    # Forward pass through current model
     noise_pred = transformer(
         hidden_states=latent_input,
         timestep=sigma_input * 1000.0,
@@ -263,12 +237,10 @@ def sd3_replay_step(
         return_dict=False,
     )[0]
 
-    # CFG
     if do_cfg:
         noise_pred_uncond, noise_pred_cond = noise_pred.chunk(2)
         noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
 
-    # SDE step with the STORED transition (prev_sample provided)
     sigma_batch = sigma.expand(batch_size)
     sigma_next_batch = sigma_next.expand(batch_size)
 
