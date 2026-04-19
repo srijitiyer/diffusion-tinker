@@ -43,6 +43,14 @@ results/
 # Drafts (internal)
 drafts/
 
+# Internal scripts (cluster jobs, diagnostics)
+scripts/cluster_*.py
+scripts/slurm_*.sh
+scripts/runpod_*.sh
+scripts/runpod_*.py
+scripts/diagnose_*.py
+scripts/ocr_reproduce*
+
 # Research docs (internal reference, not shipped)
 RESEARCH_CONTEXT.md
 IMPLEMENTATION_PLAN.md
@@ -55,4 +63,5 @@ NOISE_SCHEDULES_AND_LOSS.md
 ARCHITECTURE_REFERENCE.md
 LORA_AND_MEMORY_GUIDE.md
 REWARD_MODELS_TECHNICAL.md
+TRAINING_GUIDE.md
 .claude/
