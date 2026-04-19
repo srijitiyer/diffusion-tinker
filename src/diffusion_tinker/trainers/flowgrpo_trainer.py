@@ -40,6 +40,7 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
         config = self.config
 
         trajectory = trajectory.to(device)
+        has_signal = trajectory.advantages is not None and trajectory.advantages.std().item() > 1e-6
         num_steps = trajectory.log_probs.shape[1]
 
         # Denoising reduction: optionally train on fewer timesteps
@@ -66,7 +67,11 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
             latent_t = trajectory.latents[:, j]
             next_latent_t = trajectory.next_latents[:, j]
 
+            if not has_signal:
+                continue
+
             # Current model log-prob
+            step_noise_level = config.noise_level if j < num_steps - 1 else 0.0
             with torch.autocast(device_type=device.type, dtype=autocast_dtype):
                 log_prob_new, prev_sample_mean = sd3_replay_step(
                     transformer=self.transformer,
@@ -77,7 +82,9 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
                     prompt_embeds=trajectory.prompt_embeds,
                     pooled_embeds=trajectory.pooled_embeds,
                     guidance_scale=config.guidance_scale,
-                    noise_level=config.noise_level,
+                    noise_level=step_noise_level,
+                    negative_prompt_embeds=trajectory.negative_prompt_embeds,
+                    negative_pooled_embeds=trajectory.negative_pooled_embeds,
                 )
 
             log_prob_old = trajectory.log_probs[:, j]
@@ -110,7 +117,9 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
                                 prompt_embeds=trajectory.prompt_embeds,
                                 pooled_embeds=trajectory.pooled_embeds,
                                 guidance_scale=config.guidance_scale,
-                                noise_level=config.noise_level,
+                                noise_level=step_noise_level,
+                                negative_prompt_embeds=trajectory.negative_prompt_embeds,
+                                negative_pooled_embeds=trajectory.negative_pooled_embeds,
                             )
                     finally:
                         self.transformer.enable_adapter_layers()
