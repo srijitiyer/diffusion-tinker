@@ -21,8 +21,11 @@ class DDRLTrainer(BaseDiffusionTrainer):
 
     config: DDRLConfig
 
-    def __init__(self, model, reward_funcs, config, train_prompts=None):
-        super().__init__(model=model, reward_funcs=reward_funcs, config=config, train_prompts=train_prompts)
+    def __init__(self, model, reward_funcs, config, train_prompts=None, reward_weights=None, reward_mode="weighted_sum"):
+        super().__init__(
+            model=model, reward_funcs=reward_funcs, config=config,
+            train_prompts=train_prompts, reward_weights=reward_weights, reward_mode=reward_mode,
+        )
         self._data_latents = None
         self._setup_data()
 
@@ -167,7 +170,9 @@ class DDRLTrainer(BaseDiffusionTrainer):
                 clean_latents = self._data_latents[data_idx].to(device, dtype=autocast_dtype)
 
                 noise = torch.randn_like(clean_latents)
-                dropout_mask = torch.rand(batch_size, device=device) < config.condition_dropout
+                # full condition dropout: clean latents are from the dataset, not related
+                # to the RL prompts, so conditioning on RL prompts is semantically wrong
+                dropout_mask = torch.ones(batch_size, device=device, dtype=torch.bool)
 
                 with torch.autocast(device_type=device.type, dtype=autocast_dtype):
                     data_loss = compute_flow_matching_loss(

@@ -46,6 +46,8 @@ class TrajectoryBatch:
             prompt_embeds=self.prompt_embeds[idx],
             pooled_embeds=self.pooled_embeds[idx],
             prompts=[self.prompts[i] for i in (range(len(self.prompts))[idx] if isinstance(idx, slice) else [idx])],
+            negative_prompt_embeds=self.negative_prompt_embeds[idx] if self.negative_prompt_embeds is not None else None,
+            negative_pooled_embeds=self.negative_pooled_embeds[idx] if self.negative_pooled_embeds is not None else None,
             rewards=self.rewards[idx] if self.rewards is not None else None,
             advantages=self.advantages[idx] if self.advantages is not None else None,
             images=[self.images[i] for i in (range(len(self.images))[idx] if isinstance(idx, slice) else [idx])]

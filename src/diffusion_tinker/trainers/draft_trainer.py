@@ -7,6 +7,7 @@ import random
 from pathlib import Path
 
 import torch
+from PIL import Image as PILImage
 
 from diffusion_tinker.rewards.protocol import RewardContext, RewardFunc
 from diffusion_tinker.rewards.resolve import resolve_reward
@@ -147,7 +148,7 @@ class DRaFTTrainer:
         with torch.no_grad():
             images_np = (images_tensor * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
             images_np = images_np.transpose(0, 2, 3, 1)
-            pil_images = [__import__("PIL").Image.fromarray(img) for img in images_np]
+            pil_images = [PILImage.fromarray(img) for img in images_np]
 
         return images_tensor, pil_images
 
@@ -207,7 +208,7 @@ class DRaFTTrainer:
             )
             ctx = RewardContext(
                 images=[
-                    __import__("PIL").Image.fromarray(
+                    PILImage.fromarray(
                         (images[i].detach().cpu() * 255).clamp(0, 255).byte().permute(1, 2, 0).numpy()
                     )
                     for i in range(images.shape[0])

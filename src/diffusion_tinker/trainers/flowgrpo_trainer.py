@@ -111,7 +111,8 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
 
             loss = rl_loss + config.kl_beta * kl_loss
             loss = loss / len(timestep_indices)
-            loss.backward()
+            if loss.requires_grad:
+                loss.backward()
 
             total_rl_loss += rl_loss.item()
             total_kl_loss += kl_loss.item() if isinstance(kl_loss, torch.Tensor) else kl_loss

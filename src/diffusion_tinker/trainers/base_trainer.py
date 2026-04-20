@@ -140,7 +140,7 @@ class BaseDiffusionTrainer(ABC):
 
         ctx = RewardContext(images=trajectory.images, prompts=expanded_prompts, device=self.device)
         reward_output = self.reward_fn(ctx)
-        trajectory.rewards = reward_output.scores
+        trajectory.rewards = torch.nan_to_num(reward_output.scores, nan=0.0)
 
         return trajectory
 

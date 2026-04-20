@@ -43,7 +43,7 @@ class PerPromptStatTracker:
             if len(group_rewards) > 1:
                 std = group_rewards.std()
             else:
-                std = torch.tensor(0.0)
+                std = torch.tensor(0.0, device=rewards.device)
             advantages[indices] = (group_rewards - mean) / (std + self.eps)
 
         return advantages
