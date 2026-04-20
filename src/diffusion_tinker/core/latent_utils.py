@@ -18,7 +18,6 @@ def encode_to_latents(vae: AutoencoderKL, images: torch.Tensor) -> torch.Tensor:
         latent_dist = vae.encode(images).latent_dist
         latents = latent_dist.sample()
 
-    # SD3/Flux: has both scaling_factor and shift_factor
     latents = (latents - vae.config.shift_factor) * vae.config.scaling_factor
     return latents
 
@@ -33,7 +32,6 @@ def decode_from_latents(vae: AutoencoderKL, latents: torch.Tensor) -> torch.Tens
     Returns:
         images: (B, 3, H, W) in [0, 1] range
     """
-    # Undo normalization
     latents = latents / vae.config.scaling_factor + vae.config.shift_factor
 
     with torch.no_grad():

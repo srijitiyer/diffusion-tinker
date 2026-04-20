@@ -1,13 +1,4 @@
-"""DDPO Trainer - Denoising Diffusion Policy Optimization.
-
-Implements DDPO from arXiv:2305.13301 (Black et al., UC Berkeley).
-
-DDPO frames denoising as a multi-step MDP and applies PPO with per-step
-rewards. On flow matching models, DDPO is equivalent to FlowGRPO without
-group-relative normalization or GRPO-Guard.
-
-For the DPOK variant (per-step KL regularization), set kl_beta > 0.
-"""
+"""DDPO Trainer (arXiv:2305.13301)."""
 
 from __future__ import annotations
 
@@ -22,19 +13,7 @@ from diffusion_tinker.trainers.ddpo_config import DDPOConfig
 
 
 class DDPOTrainer(BaseDiffusionTrainer):
-    """Trainer implementing DDPO/DPOK.
-
-    Usage:
-        from diffusion_tinker import DDPOTrainer, DDPOConfig
-
-        trainer = DDPOTrainer(
-            model="stabilityai/stable-diffusion-3.5-medium",
-            reward_funcs="aesthetic",
-            train_prompts=prompts,
-            config=DDPOConfig(clip_range=0.2, ppo_epochs=2),
-        )
-        trainer.train()
-    """
+    """Trainer implementing DDPO/DPOK."""
 
     config: DDPOConfig
 
@@ -129,7 +108,6 @@ class DDPOTrainer(BaseDiffusionTrainer):
                 total_ratio += ratio.mean().item()
                 total_computed += 1
 
-        # Step optimizer after all PPO epochs
         torch.nn.utils.clip_grad_norm_(
             [p for p in self.transformer.parameters() if p.requires_grad],
             config.max_grad_norm,

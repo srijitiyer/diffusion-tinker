@@ -9,23 +9,7 @@ from diffusion_tinker.rewards.protocol import RewardContext, RewardOutput
 
 
 class ComposedReward(BaseReward):
-    """Combines multiple reward functions with weighted aggregation.
-
-    Two aggregation modes:
-    - "weighted_sum": score = sum(w_i * r_i) - simple weighted sum of raw scores
-    - "advantage_level": normalize each reward per-batch, then weight and sum.
-      This is DanceGRPO's approach - prevents rewards on different scales from
-      dominating.
-
-    Usage:
-        composed = ComposedReward(
-            rewards=["aesthetic", "clip_score"],
-            weights=[0.6, 0.4],
-            mode="advantage_level",
-            device="cuda",
-        )
-        output = composed(ctx)
-    """
+    """Combines multiple reward functions with weighted aggregation."""
 
     name = "composed"
 
@@ -55,7 +39,6 @@ class ComposedReward(BaseReward):
             metadata[f"reward_{reward_fn.name}"] = output.scores.mean().item()
 
         if self.mode == "advantage_level":
-            # DanceGRPO: normalize each reward per-batch, then weight
             combined = torch.zeros_like(all_scores[0])
             for scores, w in zip(all_scores, self.weights):
                 mean = scores.mean()
@@ -63,7 +46,6 @@ class ComposedReward(BaseReward):
                 normalized = (scores - mean) / (std + 1e-4)
                 combined = combined + w * normalized
         else:
-            # Simple weighted sum
             combined = torch.zeros_like(all_scores[0])
             for scores, w in zip(all_scores, self.weights):
                 combined = combined + w * scores

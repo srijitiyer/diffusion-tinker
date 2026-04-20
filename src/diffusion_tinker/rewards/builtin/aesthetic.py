@@ -36,13 +36,7 @@ class _AestheticMLP(nn.Module):
 
 @register_reward("aesthetic")
 class AestheticReward(BaseReward):
-    """CLIP + MLP aesthetic score predictor.
-
-    Usage:
-        reward = AestheticReward(device="cuda")
-        output = reward(RewardContext(images=pil_images, prompts=prompts))
-        # output.scores is shape (B,) with values ~1-10
-    """
+    """CLIP + MLP aesthetic score predictor."""
 
     name = "aesthetic"
 
@@ -62,7 +56,6 @@ class AestheticReward(BaseReward):
         self._processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")
 
         self._mlp = _AestheticMLP()
-        # Load pretrained weights
         state_dict = torch.hub.load_state_dict_from_url(
             "https://github.com/christophschuhmann/improved-aesthetic-predictor/raw/main/sac+logos+ava1-l14-linearMSE.pth",
             map_location="cpu",
@@ -81,16 +74,11 @@ class AestheticReward(BaseReward):
         inputs = self._processor(images=ctx.images, return_tensors="pt")
         pixel_values = inputs["pixel_values"].to(self.device, self.dtype)
 
-        # Get CLIP image embeddings via the vision model + projection
         vision_out = self._clip.vision_model(pixel_values=pixel_values)
-        # Pool: use the CLS token output (first token), then project
-        pooled = vision_out.pooler_output  # (B, 768)
-        embed = self._clip.visual_projection(pooled)  # (B, 768)
-
-        # L2 normalize
+        pooled = vision_out.pooler_output
+        embed = self._clip.visual_projection(pooled)
         embed = embed / torch.linalg.vector_norm(embed, dim=-1, keepdim=True)
 
-        # MLP forward (expects 768-dim input)
         scores = self._mlp(embed).squeeze(-1)
 
         return RewardOutput(scores=scores.float().cpu())

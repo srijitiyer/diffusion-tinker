@@ -31,7 +31,6 @@ class CLIPScoreReward(BaseReward):
     def _compute(self, ctx: RewardContext) -> RewardOutput:
         self._ensure_loaded()
 
-        # Process images and text together
         inputs = self._processor(
             images=ctx.images,
             text=ctx.prompts,
@@ -48,16 +47,12 @@ class CLIPScoreReward(BaseReward):
         vision_out = self._clip.vision_model(pixel_values=pixel_values)
         image_features = self._clip.visual_projection(vision_out.pooler_output)
 
-        # Get text features via text model + projection
         text_out = self._clip.text_model(input_ids=input_ids, attention_mask=attention_mask)
         text_features = self._clip.text_projection(text_out.pooler_output)
 
-        # L2 normalize
         image_features = image_features / torch.linalg.vector_norm(image_features, dim=-1, keepdim=True)
         text_features = text_features / torch.linalg.vector_norm(text_features, dim=-1, keepdim=True)
 
-        # Per-sample cosine similarity (diagonal of the cross-similarity matrix)
-        # Multiply by 100 to match torchmetrics CLIP score convention
         scores = (image_features * text_features).sum(dim=-1) * 100.0
 
         return RewardOutput(scores=scores.float().cpu())

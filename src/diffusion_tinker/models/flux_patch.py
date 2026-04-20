@@ -1,9 +1,4 @@
-"""FLUX pipeline modification for SDE sampling with log-probability collection.
-
-Patches FluxPipeline to return denoising trajectories and per-step log-probabilities.
-Key difference from SD3: FLUX uses 2x2 patch packing of latents, different text
-encoding (CLIP + T5 only, no CLIP-G), and 3D rotary position embeddings.
-"""
+"""FLUX pipeline with SDE sampling and log-probability collection."""
 
 from __future__ import annotations
 
@@ -26,7 +21,6 @@ class FluxModelConfig:
 
     def __post_init__(self):
         if self.lora_target_modules is None:
-            # Dual-stream block attention
             self.lora_target_modules = [
                 "attn.to_q",
                 "attn.to_k",
@@ -103,7 +97,6 @@ def flux_sample_with_logprob(
     dtype = pipeline.transformer.dtype
     batch_size = len(prompts)
 
-    # 1. Encode text (CLIP pooled + T5 sequence)
     prompt_embeds, pooled_prompt_embeds, text_ids = pipeline.encode_prompt(
         prompt=prompts,
         prompt_2=None,
@@ -111,7 +104,6 @@ def flux_sample_with_logprob(
         max_sequence_length=512,
     )
 
-    # 2. Prepare initial noise latents (in spatial format, then pack)
     latent_channels = 16
     latent_h = height // 8
     latent_w = width // 8
@@ -122,10 +114,8 @@ def flux_sample_with_logprob(
         generator=generator,
     )
 
-    # Pack to sequence format for transformer
     latents = _pack_latents(latents_spatial, height, width)
 
-    # 3. Prepare position IDs
     img_ids = _prepare_img_ids(batch_size, height, width, device, dtype)
     txt_ids = (
         text_ids.to(device=device, dtype=dtype)
@@ -133,19 +123,15 @@ def flux_sample_with_logprob(
         else torch.zeros(prompt_embeds.shape[1], 3, device=device, dtype=dtype)
     )
 
-    # 4. Set up scheduler
     pipeline.scheduler.set_timesteps(num_inference_steps, device=device)
     sigmas = pipeline.scheduler.sigmas
 
-    # Scale initial latents
     latents = latents * sigmas[0]
 
-    # 5. Denoising loop
     all_latents = []
     all_next_latents = []
     all_log_probs = []
 
-    # Guidance embed (for FLUX guidance-distilled models)
     guidance = torch.full((batch_size,), guidance_scale, device=device, dtype=dtype)
 
     for i, sigma in enumerate(sigmas[:-1]):
@@ -154,7 +140,6 @@ def flux_sample_with_logprob(
 
         timestep = sigma.expand(batch_size)
 
-        # Transformer forward (FLUX expects raw sigma, not sigma*1000 like SD3)
         noise_pred = pipeline.transformer(
             hidden_states=latents,
             timestep=timestep,
@@ -166,7 +151,6 @@ def flux_sample_with_logprob(
             return_dict=False,
         )[0]
 
-        # SDE step (operates on packed sequence format)
         step_noise_level = noise_level if i < len(sigmas) - 2 else 0.0
         sigma_batch = sigma.expand(batch_size)
         sigma_next_batch = sigma_next.expand(batch_size)
@@ -184,12 +168,10 @@ def flux_sample_with_logprob(
         all_next_latents.append(latents.detach().cpu())
         all_log_probs.append(log_prob.detach().cpu())
 
-    # 6. Unpack and VAE decode
     latents_spatial = _unpack_latents(latents, height, width, channels=latent_channels)
     latents_spatial = latents_spatial / pipeline.vae.config.scaling_factor + pipeline.vae.config.shift_factor
     images_tensor = pipeline.vae.decode(latents_spatial, return_dict=False)[0].clamp(0, 1)
 
-    # Convert to PIL
     images_np = (images_tensor * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
     images_np = images_np.transpose(0, 2, 3, 1)
     images = [Image.fromarray(img) for img in images_np]

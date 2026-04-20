@@ -38,23 +38,17 @@ class BaseDiffusionTrainer(ABC):
         self.global_step = 0
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Set seed
         torch.manual_seed(config.seed)
         random.seed(config.seed)
 
-        # Load model
         self._setup_model(model)
 
-        # Set up reward (supports multi-reward: reward_funcs=["aesthetic", "clip_score"])
-        reward_device = self.device
         self.reward_fn = resolve_reward(
-            reward_funcs, device=str(reward_device), reward_weights=reward_weights, reward_mode=reward_mode
+            reward_funcs, device=str(self.device), reward_weights=reward_weights, reward_mode=reward_mode
         )
 
-        # Stat tracking for per-prompt advantage normalization
         self.stat_tracker = PerPromptStatTracker()
 
-        # Optimizer - only LoRA params have requires_grad
         trainable_params = [p for p in self.transformer.parameters() if p.requires_grad]
         self.optimizer = torch.optim.AdamW(
             trainable_params,
@@ -69,7 +63,6 @@ class BaseDiffusionTrainer(ABC):
         print(f"Total params: {sum(p.numel() for p in self.transformer.parameters()):,}")
 
     def _setup_model(self, model_id: str):
-        """Load pipeline, apply LoRA, freeze non-trainable components."""
         from diffusers import StableDiffusion3Pipeline
 
         dtype = torch.bfloat16 if self.config.mixed_precision == "bf16" else torch.float16
@@ -83,7 +76,6 @@ class BaseDiffusionTrainer(ABC):
         self.scheduler = self.pipeline.scheduler
         self.model_config = SD3ModelConfig()
 
-        # Freeze VAE and text encoders
         self.vae.eval()
         self.vae.requires_grad_(False)
         if self.pipeline.text_encoder is not None:
@@ -93,7 +85,6 @@ class BaseDiffusionTrainer(ABC):
         if self.pipeline.text_encoder_3 is not None:
             self.pipeline.text_encoder_3.requires_grad_(False)
 
-        # Apply LoRA
         lora_config = LoraConfig(
             r=self.config.lora_rank,
             lora_alpha=self.config.lora_alpha,
@@ -103,29 +94,20 @@ class BaseDiffusionTrainer(ABC):
         self.transformer.add_adapter(lora_config)
         print(f"LoRA applied: rank={self.config.lora_rank}, alpha={self.config.lora_alpha}")
 
-        # Gradient checkpointing
         if self.config.gradient_checkpointing:
             self.transformer.enable_gradient_checkpointing()
 
-        # Cast trainable params to float32 for stable training
         for p in self.transformer.parameters():
             if p.requires_grad:
                 p.data = p.data.float()
 
     @torch.no_grad()
     def _sample_trajectories(self, prompts: list[str]) -> TrajectoryBatch:
-        """Generate images from current policy and collect trajectories + log-probs.
-
-        Processes prompts in mini-batches to avoid OOM. Each prompt generates
-        num_samples_per_prompt images, so batch size = num_samples_per_prompt
-        per prompt group.
-        """
         self.transformer.eval()
 
         all_outputs = []
         expanded_prompts: list[str] = []
 
-        # Process one prompt at a time (each generates num_samples_per_prompt images)
         for p in prompts:
             batch = [p] * self.config.num_samples_per_prompt
             expanded_prompts.extend(batch)
@@ -141,13 +123,12 @@ class BaseDiffusionTrainer(ABC):
             )
             all_outputs.append(output)
 
-        # Concatenate all mini-batch outputs
         has_neg = all_outputs[0].negative_prompt_embeds is not None
         trajectory = TrajectoryBatch(
             latents=torch.cat([o.latents_trajectory for o in all_outputs], dim=0),
             next_latents=torch.cat([o.next_latents_trajectory for o in all_outputs], dim=0),
             log_probs=torch.cat([o.log_probs for o in all_outputs], dim=0),
-            timesteps=all_outputs[0].timesteps,  # Same schedule for all batches
+            timesteps=all_outputs[0].timesteps,
             prompt_embeds=torch.cat([o.prompt_embeds for o in all_outputs], dim=0),
             pooled_embeds=torch.cat([o.pooled_embeds for o in all_outputs], dim=0),
             negative_prompt_embeds=torch.cat([o.negative_prompt_embeds for o in all_outputs], dim=0) if has_neg else None,
@@ -157,7 +138,6 @@ class BaseDiffusionTrainer(ABC):
             images=[img for o in all_outputs for img in o.images],
         )
 
-        # Compute rewards on all images at once (reward models are lightweight)
         ctx = RewardContext(images=trajectory.images, prompts=expanded_prompts, device=self.device)
         reward_output = self.reward_fn(ctx)
         trajectory.rewards = reward_output.scores
@@ -186,12 +166,8 @@ class BaseDiffusionTrainer(ABC):
         print(f"Starting training: {self.config.num_epochs} epochs, {len(self.train_prompts)} prompts")
 
         for epoch in range(self.config.num_epochs):
-            # Shuffle prompts each epoch
             epoch_prompts = self.train_prompts.copy()
             random.shuffle(epoch_prompts)
-
-            # Process all prompts each epoch. Each prompt generates num_samples_per_prompt images,
-            # so total images = len(prompts) * num_samples_per_prompt.
             batch_prompts = epoch_prompts
 
             trajectory = self._sample_trajectories(batch_prompts)
@@ -240,12 +216,10 @@ class BaseDiffusionTrainer(ABC):
                     )
                     break
 
-        # Final save
         self._save_checkpoint(self.config.num_epochs)
         print("Training complete.")
 
     def _save_checkpoint(self, epoch: int):
-        """Save LoRA adapter weights."""
         save_path = Path(self.config.output_dir) / f"checkpoint-{epoch}"
         save_path.mkdir(parents=True, exist_ok=True)
         self.transformer.save_pretrained(str(save_path))

@@ -1,10 +1,4 @@
-"""DiffusionDPO Trainer - Direct Preference Optimization for Diffusion Models.
-
-Implements DiffusionDPO from arXiv:2311.12908, adapted for flow matching (SD3/3.5).
-
-Unlike DDRL and FlowGRPO, DPO is an offline method that uses preference pairs
-(winner/loser images) instead of online sampling with reward functions.
-"""
+"""DiffusionDPO Trainer (arXiv:2311.12908)."""
 
 from __future__ import annotations
 
@@ -24,20 +18,7 @@ from diffusion_tinker.trainers.diffusion_dpo_config import DiffusionDPOConfig
 
 
 class DiffusionDPOTrainer:
-    """Trainer implementing DiffusionDPO for diffusion models.
-
-    Usage:
-        from diffusion_tinker import DiffusionDPOTrainer, DiffusionDPOConfig
-
-        trainer = DiffusionDPOTrainer(
-            model="stabilityai/stable-diffusion-3.5-medium",
-            config=DiffusionDPOConfig(
-                dataset_name="yuvalkirstain/pickapic_v2",
-                beta=5000,
-            ),
-        )
-        trainer.train()
-    """
+    """Trainer implementing DiffusionDPO for diffusion models."""
 
     def __init__(self, model: str, config: DiffusionDPOConfig):
         self.config = config
@@ -55,7 +36,6 @@ class DiffusionDPOTrainer:
         print(f"Trainable params: {sum(p.numel() for p in trainable_params):,}")
 
     def _setup_model(self, model_id: str):
-        """Load pipeline, apply LoRA, freeze non-trainable components."""
         from diffusers import StableDiffusion3Pipeline
 
         dtype = torch.bfloat16 if self.config.mixed_precision == "bf16" else torch.float16
@@ -68,14 +48,12 @@ class DiffusionDPOTrainer:
         self.vae = self.pipeline.vae
         self.model_config = SD3ModelConfig()
 
-        # Freeze everything
         self.vae.eval()
         self.vae.requires_grad_(False)
         for enc in [self.pipeline.text_encoder, self.pipeline.text_encoder_2, self.pipeline.text_encoder_3]:
             if enc is not None:
                 enc.requires_grad_(False)
 
-        # Apply LoRA
         lora_config = LoraConfig(
             r=self.config.lora_rank,
             lora_alpha=self.config.lora_alpha,
@@ -94,7 +72,6 @@ class DiffusionDPOTrainer:
         print(f"LoRA applied: rank={self.config.lora_rank}, alpha={self.config.lora_alpha}")
 
     def _setup_data(self):
-        """Build preference dataloader."""
         if self.config.dataset_name is None:
             raise ValueError("DiffusionDPO requires dataset_name in config.")
 
@@ -124,8 +101,7 @@ class DiffusionDPOTrainer:
         print(f"Dataset loaded: {len(pref_ds)} preference pairs")
 
     def _encode_prompts(self, prompts: list[str]):
-        """Encode text prompts using the pipeline's text encoders."""
-        do_cfg = False  # DPO doesn't use CFG during training
+        do_cfg = False
         prompt_embeds, _, pooled_prompt_embeds, _ = self.pipeline.encode_prompt(
             prompt=prompts,
             prompt_2=None,
@@ -147,32 +123,26 @@ class DiffusionDPOTrainer:
         autocast_dtype = torch.bfloat16 if config.mixed_precision == "bf16" else torch.float16
         B = batch["winner"].shape[0]
 
-        # Encode images to latents
         with torch.no_grad():
             winner_latents = encode_to_latents(self.vae, batch["winner"].to(device, dtype=self.vae.dtype))
             loser_latents = encode_to_latents(self.vae, batch["loser"].to(device, dtype=self.vae.dtype))
 
-        # Encode prompts
         with torch.no_grad():
             prompt_embeds, pooled_embeds = self._encode_prompts(batch["prompts"])
 
-        # Sample random timestep
         t = torch.rand(B, device=device)
         t_bc = t.view(B, 1, 1, 1)
 
-        # Forward process (rectified flow): x_t = (1-t)*x_0 + t*eps
         noise_w = torch.randn_like(winner_latents)
         noise_l = torch.randn_like(loser_latents)
         noisy_w = (1.0 - t_bc) * winner_latents + t_bc * noise_w
         noisy_l = (1.0 - t_bc) * loser_latents + t_bc * noise_l
 
-        # Velocity targets
         v_target_w = noise_w - winner_latents
         v_target_l = noise_l - loser_latents
 
         timestep = t * 1000.0
 
-        # Current model predictions
         with torch.autocast(device_type=device.type, dtype=autocast_dtype):
             v_pred_w = self.transformer(
                 hidden_states=noisy_w,
@@ -189,7 +159,7 @@ class DiffusionDPOTrainer:
                 return_dict=False,
             )[0]
 
-        # Reference model predictions (disable LoRA)
+        # reference model = base model with LoRA disabled
         with torch.no_grad():
             self.transformer.disable_adapter_layers()
             try:
@@ -211,14 +181,11 @@ class DiffusionDPOTrainer:
             finally:
                 self.transformer.enable_adapter_layers()
 
-        # Denoising errors (MSE per sample)
         loss_w_model = (v_target_w.float() - v_pred_w.float()).pow(2).mean(dim=[1, 2, 3])
         loss_w_ref = (v_target_w.float() - v_ref_w.float()).pow(2).mean(dim=[1, 2, 3])
         loss_l_model = (v_target_l.float() - v_pred_l.float()).pow(2).mean(dim=[1, 2, 3])
         loss_l_ref = (v_target_l.float() - v_ref_l.float()).pow(2).mean(dim=[1, 2, 3])
 
-        # DPO loss: model should denoise winner better (lower error) than loser
-        # Negative inside sigmoid because lower denoising error = better
         inside_sigmoid = -config.beta * ((loss_w_model - loss_w_ref) - (loss_l_model - loss_l_ref))
         loss = -F.logsigmoid(inside_sigmoid).mean()
 

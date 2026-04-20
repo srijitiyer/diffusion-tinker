@@ -1,14 +1,4 @@
-"""DRaFT Trainer - Direct Reward Fine-Tuning for Diffusion Models.
-
-Implements DRaFT from arXiv:2309.17400 (Clark et al., Google DeepMind).
-
-Unlike policy gradient methods (DDRL, FlowGRPO), DRaFT backpropagates reward
-gradients directly through truncated denoising chains. This requires a
-differentiable reward function but avoids the high variance of REINFORCE.
-
-DRaFT-1: gradient through last step only (fast, low memory)
-DRaFT-K: gradient through last K steps (better signal, more memory)
-"""
+"""DRaFT Trainer (arXiv:2309.17400)."""
 
 from __future__ import annotations
 
@@ -24,19 +14,7 @@ from diffusion_tinker.trainers.draft_config import DRaFTConfig
 
 
 class DRaFTTrainer:
-    """Trainer implementing DRaFT (Direct Reward Fine-Tuning).
-
-    Usage:
-        from diffusion_tinker import DRaFTTrainer, DRaFTConfig
-
-        trainer = DRaFTTrainer(
-            model="stabilityai/stable-diffusion-3.5-medium",
-            reward_funcs="aesthetic",  # must be differentiable
-            train_prompts=prompts,
-            config=DRaFTConfig(truncation_steps=1),
-        )
-        trainer.train()
-    """
+    """Trainer implementing DRaFT (Direct Reward Fine-Tuning)."""
 
     def __init__(
         self,
@@ -61,7 +39,6 @@ class DRaFTTrainer:
         print(f"Trainable params: {sum(p.numel() for p in trainable_params):,}")
 
     def _setup_model(self, model_id: str):
-        """Load pipeline, apply LoRA."""
         from diffusers import StableDiffusion3Pipeline
         from peft import LoraConfig
 
@@ -101,20 +78,13 @@ class DRaFTTrainer:
         print(f"LoRA applied: rank={self.config.lora_rank}")
 
     def _denoise_with_grad(self, prompts: list[str]) -> tuple[torch.Tensor, list]:
-        """Run denoising with gradients through the last K steps.
-
-        Steps 0...(T-K-1) run under no_grad (fast).
-        Steps (T-K)...(T-1) run with gradients (for backprop through reward).
-
-        Returns decoded images as tensors (with grad) and PIL images.
-        """
+        """Run denoising with gradients through the last K steps."""
         device = self.device
         dtype = self.pipeline.transformer.dtype
         config = self.config
         batch_size = len(prompts)
         K = config.truncation_steps
 
-        # Encode text
         prompt_embeds, negative_prompt_embeds, pooled_prompt_embeds, negative_pooled_prompt_embeds = (
             self.pipeline.encode_prompt(
                 prompt=prompts,
@@ -126,7 +96,6 @@ class DRaFTTrainer:
             )
         )
 
-        # Initial noise
         latent_channels = self.pipeline.transformer.config.in_channels
         latents = torch.randn(
             (batch_size, latent_channels, config.resolution // 8, config.resolution // 8),
@@ -134,7 +103,6 @@ class DRaFTTrainer:
             device=device,
         )
 
-        # Set up scheduler
         self.pipeline.scheduler.set_timesteps(config.num_inference_steps, device=device)
         sigmas = self.pipeline.scheduler.sigmas
         latents = latents * sigmas[0]
@@ -142,7 +110,6 @@ class DRaFTTrainer:
         num_steps = len(sigmas) - 1
         grad_start = max(0, num_steps - K)
 
-        # Phase 1: no-grad steps (0 to T-K-1)
         self.transformer.eval()
         with torch.no_grad():
             for i in range(grad_start):
@@ -155,11 +122,9 @@ class DRaFTTrainer:
                     return_dict=False,
                 )[0]
 
-                # Deterministic ODE step (no SDE noise in no-grad phase)
                 dt = sigmas[i + 1] - sigmas[i]
                 latents = latents + noise_pred * dt
 
-        # Phase 2: grad steps (T-K to T-1)
         self.transformer.train()
         latents = latents.detach().requires_grad_(True)
 
@@ -176,11 +141,9 @@ class DRaFTTrainer:
             dt = sigmas[i + 1] - sigmas[i]
             latents = latents + noise_pred * dt
 
-        # VAE decode (with grad for reward backprop)
         latents_decoded = latents / self.vae.config.scaling_factor + self.vae.config.shift_factor
         images_tensor = self.vae.decode(latents_decoded, return_dict=False)[0].clamp(0, 1)
 
-        # Also create PIL images for reward computation
         with torch.no_grad():
             images_np = (images_tensor * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
             images_np = images_np.transpose(0, 2, 3, 1)
@@ -189,22 +152,12 @@ class DRaFTTrainer:
         return images_tensor, pil_images
 
     def _training_step(self, prompts: list[str]) -> dict[str, float]:
-        """Generate images with grad, compute differentiable reward, backprop.
-
-        DRaFT requires gradient flow from reward -> VAE decode -> denoising steps -> LoRA.
-        The reward must be computed on the image TENSOR (not PIL), keeping the grad graph.
-        We use the CLIP vision model directly on the differentiable image tensor.
-        """
         config = self.config
         autocast_dtype = torch.bfloat16 if config.mixed_precision == "bf16" else torch.float16
 
         with torch.autocast(device_type=self.device.type, dtype=autocast_dtype):
             images_tensor, pil_images = self._denoise_with_grad(prompts)
 
-        # Compute differentiable reward directly on the image tensor.
-        # We need gradients to flow: images_tensor -> reward -> loss -> backward.
-        # The standard reward._compute() operates on PIL (no grad). For DRaFT,
-        # we compute a differentiable proxy using CLIP image features on the tensor.
         rewards = self._differentiable_reward(images_tensor, prompts)
 
         loss = -rewards.mean()
@@ -216,19 +169,11 @@ class DRaFTTrainer:
         }
 
     def _differentiable_reward(self, images: torch.Tensor, prompts: list[str]) -> torch.Tensor:
-        """Compute reward on image tensor with gradient flow preserved.
-
-        Uses CLIP-based scoring directly on the tensor to maintain the computation graph.
-        Falls back to non-differentiable reward with a warning if the reward model
-        doesn't support tensor input.
-        """
+        """Compute reward on image tensor with gradient flow preserved."""
         from torchvision.transforms.functional import normalize, resize
 
-        # Ensure the reward model's CLIP is loaded
         self.reward_fn._ensure_loaded()
 
-        # Differentiable image preprocessing for CLIP (resize + normalize)
-        # These operations preserve gradients
         images_resized = resize(images, [224, 224], antialias=True)
         images_normalized = normalize(
             images_resized,
@@ -236,18 +181,15 @@ class DRaFTTrainer:
             std=[0.26862954, 0.26130258, 0.27577711],
         )
 
-        # Forward through CLIP vision model (preserves gradients)
         if hasattr(self.reward_fn, "_clip"):
             clip = self.reward_fn._clip
             vision_out = clip.vision_model(pixel_values=images_normalized.to(clip.dtype))
             embed = clip.visual_projection(vision_out.pooler_output)
             embed = embed / torch.linalg.vector_norm(embed, dim=-1, keepdim=True)
 
-            # Route to aesthetic MLP if available, else use CLIP-text similarity
             if hasattr(self.reward_fn, "_mlp"):
                 scores = self.reward_fn._mlp(embed).squeeze(-1)
             else:
-                # CLIP score path: compute similarity with text
                 tokenizer = self.reward_fn._processor.tokenizer
                 text_inputs = tokenizer(prompts, padding=True, truncation=True, max_length=77, return_tensors="pt")
                 text_inputs = {k: v.to(self.device) for k, v in text_inputs.items()}
@@ -306,7 +248,6 @@ class DRaFTTrainer:
                 epoch_reward += metrics["mean_reward"]
                 num_steps += 1
 
-            # Optimizer step (after accumulating gradients)
             torch.nn.utils.clip_grad_norm_(
                 [p for p in self.transformer.parameters() if p.requires_grad],
                 config.max_grad_norm,
@@ -324,7 +265,6 @@ class DRaFTTrainer:
                 save_path.mkdir(parents=True, exist_ok=True)
                 self.transformer.save_pretrained(str(save_path))
 
-        # Final save
         save_path = Path(config.output_dir) / f"checkpoint-{config.num_epochs}"
         save_path.mkdir(parents=True, exist_ok=True)
         self.transformer.save_pretrained(str(save_path))

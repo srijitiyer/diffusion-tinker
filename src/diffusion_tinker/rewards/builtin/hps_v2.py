@@ -1,10 +1,4 @@
-"""HPS v2 reward - Human Preference Score using OpenCLIP ViT-H-14.
-
-Trained on the HPD (Human Preference Dataset) with 798K+ preference pairs.
-Requires: pip install open-clip-torch
-
-Output range: roughly 0.20-0.35 for generated images.
-"""
+"""HPS v2 reward (OpenCLIP ViT-H-14, output ~0.20-0.35)."""
 
 from __future__ import annotations
 
@@ -17,14 +11,7 @@ from diffusion_tinker.rewards.resolve import register_reward
 
 @register_reward("hps_v2")
 class HPSv2Reward(BaseReward):
-    """Human Preference Score v2.1 reward.
-
-    Uses OpenCLIP ViT-H-14 fine-tuned on human preference data.
-
-    Usage:
-        reward = HPSv2Reward(device="cuda")
-        output = reward(RewardContext(images=pil_images, prompts=prompts))
-    """
+    """Human Preference Score v2.1 reward."""
 
     name = "hps_v2"
 
@@ -41,12 +28,10 @@ class HPSv2Reward(BaseReward):
         import open_clip
         from huggingface_hub import hf_hub_download
 
-        # Load base OpenCLIP ViT-H-14
         model, _, preprocess = open_clip.create_model_and_transforms(
             "ViT-H-14", pretrained="laion2B-s32B-b79K", device=self.device
         )
 
-        # Download and load HPS v2.1 fine-tuned weights
         ckpt_path = hf_hub_download("xswu/HPSv2", "HPS_v2.1_compressed.pt")
         checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=True)
         model.load_state_dict(checkpoint["state_dict"])
@@ -62,22 +47,17 @@ class HPSv2Reward(BaseReward):
     def _compute(self, ctx: RewardContext) -> RewardOutput:
         self._ensure_loaded()
 
-        # Preprocess images
         image_tensors = torch.stack([self._preprocess(img) for img in ctx.images])
         image_tensors = image_tensors.to(self.device, self.dtype)
 
-        # Tokenize prompts
         text_tokens = self._tokenizer(ctx.prompts).to(self.device)
 
-        # Forward pass
         image_features = self._model.encode_image(image_tensors)
         text_features = self._model.encode_text(text_tokens)
 
-        # L2 normalize
         image_features = image_features / torch.linalg.vector_norm(image_features, dim=-1, keepdim=True)
         text_features = text_features / torch.linalg.vector_norm(text_features, dim=-1, keepdim=True)
 
-        # Per-sample cosine similarity
         scores = (image_features * text_features).sum(dim=-1)
 
         return RewardOutput(scores=scores.float().cpu())

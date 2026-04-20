@@ -1,10 +1,4 @@
-"""SFT Trainer - Supervised Fine-Tuning for Diffusion Models.
-
-Standard diffusion denoising loss on image-text pairs. No RL, no rewards.
-The simplest training method and the baseline for all RL methods.
-
-For flow matching models (SD3, FLUX): velocity prediction loss.
-"""
+"""SFT Trainer."""
 
 from __future__ import annotations
 
@@ -57,17 +51,7 @@ def _sft_collate(batch):
 
 
 class SFTTrainer:
-    """Supervised fine-tuning trainer for diffusion models.
-
-    Usage:
-        from diffusion_tinker import SFTTrainer, SFTConfig
-
-        trainer = SFTTrainer(
-            model="stabilityai/stable-diffusion-3.5-medium",
-            config=SFTConfig(train_dataset="lambdalabs/naruto-blip-captions"),
-        )
-        trainer.train()
-    """
+    """Supervised fine-tuning trainer for diffusion models."""
 
     def __init__(self, model: str, config: SFTConfig):
         self.config = config
@@ -150,11 +134,9 @@ class SFTTrainer:
         autocast_dtype = torch.bfloat16 if config.mixed_precision == "bf16" else torch.float16
         B = batch["images"].shape[0]
 
-        # Encode images to latents
         with torch.no_grad():
             latents = encode_to_latents(self.vae, batch["images"].to(device, dtype=self.vae.dtype))
 
-        # Encode captions
         with torch.no_grad():
             prompt_embeds, _, pooled_prompt_embeds, _ = self.pipeline.encode_prompt(
                 prompt=batch["captions"],
@@ -165,13 +147,11 @@ class SFTTrainer:
                 device=device,
             )
 
-        # Sample random timestep (logit-normal for SD3)
         u = torch.normal(mean=config.logit_mean, std=config.logit_std, size=(B,), device=device)
         t = torch.sigmoid(u)
 
         noise = torch.randn_like(latents)
 
-        # Condition dropout
         dropout_mask = torch.rand(B, device=device) < config.condition_dropout
 
         with torch.autocast(device_type=device.type, dtype=autocast_dtype):

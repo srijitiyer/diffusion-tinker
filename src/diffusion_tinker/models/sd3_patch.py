@@ -60,27 +60,12 @@ def sd3_sample_with_logprob(
     width: int = 512,
     generator: torch.Generator | None = None,
 ) -> SD3SamplingOutput:
-    """Run SD3 pipeline with SDE sampling, collecting trajectories and log-probs.
-
-    Args:
-        pipeline: loaded StableDiffusion3Pipeline
-        prompts: list of B text prompts
-        num_inference_steps: denoising steps (T)
-        guidance_scale: CFG scale (0 = no CFG)
-        noise_level: SDE noise injection strength
-        height: image height in pixels
-        width: image width in pixels
-        generator: random generator for reproducibility
-
-    Returns:
-        SD3SamplingOutput with images, trajectories, log-probs, and embeddings
-    """
+    """Run SD3 pipeline with SDE sampling, collecting trajectories and log-probs."""
     device = pipeline.transformer.device
     dtype = pipeline.transformer.dtype
     batch_size = len(prompts)
     do_cfg = guidance_scale > 1.0
 
-    # encode text
     (
         prompt_embeds,
         negative_prompt_embeds,
@@ -95,7 +80,6 @@ def sd3_sample_with_logprob(
         device=device,
     )
 
-    # initial noise
     latent_channels = pipeline.transformer.config.in_channels
     latents = torch.randn(
         (batch_size, latent_channels, height // 8, width // 8),
@@ -104,13 +88,11 @@ def sd3_sample_with_logprob(
         generator=generator,
     )
 
-    # scheduler
     pipeline.scheduler.set_timesteps(num_inference_steps, device=device)
-    sigmas = pipeline.scheduler.sigmas  # (T+1,) descending from ~1 to 0
+    sigmas = pipeline.scheduler.sigmas
 
     latents = latents * sigmas[0]
 
-    # denoising loop
     all_latents = []
     all_next_latents = []
     all_log_probs = []
@@ -162,16 +144,16 @@ def sd3_sample_with_logprob(
 
     decoded = _decode_latents(pipeline, latents)
     images = _tensor_to_pil(decoded)
-    latents_traj = torch.stack(all_latents, dim=1)  # (B, T, C, H, W)
+    latents_traj = torch.stack(all_latents, dim=1)
     next_latents_traj = torch.stack(all_next_latents, dim=1)
-    log_probs_traj = torch.stack(all_log_probs, dim=1)  # (B, T)
+    log_probs_traj = torch.stack(all_log_probs, dim=1)
 
     return SD3SamplingOutput(
         images=images,
         latents_trajectory=latents_traj,
         next_latents_trajectory=next_latents_traj,
         log_probs=log_probs_traj,
-        timesteps=sigmas.cpu(),  # Full sigma schedule (T+1,) so we can look up sigma_next
+        timesteps=sigmas.cpu(),
         prompt_embeds=prompt_embeds.detach().cpu(),
         pooled_embeds=pooled_prompt_embeds.detach().cpu(),
         negative_prompt_embeds=negative_prompt_embeds.detach().cpu() if do_cfg else None,
@@ -192,24 +174,7 @@ def sd3_replay_step(
     negative_prompt_embeds: torch.Tensor | None = None,
     negative_pooled_embeds: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Replay a single denoising step through the CURRENT model to get updated log-probs.
-
-    Used during training to compute the importance ratio (new_log_prob / old_log_prob).
-
-    Args:
-        transformer: the model (with current LoRA weights)
-        latent_t: stored latent before this step, shape (B, C, H, W)
-        next_latent_t: stored latent after this step, shape (B, C, H, W)
-        sigma, sigma_next: noise levels for this step
-        prompt_embeds, pooled_embeds: text conditioning
-        guidance_scale: CFG scale
-        noise_level: SDE noise level
-        negative_prompt_embeds: for CFG (zeros if not provided)
-
-    Returns:
-        log_prob: current policy log-prob of the stored transition, shape (B,)
-        prev_sample_mean: mean of current policy's transition distribution, shape (B, C, H, W)
-    """
+    """Replay a single denoising step to get updated log-probs for importance sampling."""
     batch_size = latent_t.shape[0]
     do_cfg = guidance_scale > 1.0
 
@@ -266,5 +231,5 @@ def _decode_latents(pipeline: StableDiffusion3Pipeline, latents: torch.Tensor) -
 def _tensor_to_pil(images: torch.Tensor) -> list[Image.Image]:
     """Convert (B, 3, H, W) float tensor in [0,1] to list of PIL Images."""
     images_np = (images * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
-    images_np = images_np.transpose(0, 2, 3, 1)  # BCHW -> BHWC
+    images_np = images_np.transpose(0, 2, 3, 1)
     return [Image.fromarray(img) for img in images_np]
