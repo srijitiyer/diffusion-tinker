@@ -74,7 +74,26 @@ trainer.train()
 | **Custom** | `reward_funcs=my_fn` | - |
 | **Multi-reward** | `["aesthetic", "clip_score"]` | - |
 
-Custom reward functions take a `RewardContext` (with `.images` and `.prompts`) and return a `RewardOutput` (with `.scores` tensor).
+Custom reward functions receive a `RewardContext` and can return any of:
+- `RewardOutput(scores=tensor)` - full control
+- `torch.Tensor` - scores directly
+- `list[float]` - converted to tensor automatically
+
+```python
+def my_reward(ctx):
+    # ctx.images: list of PIL images, ctx.prompts: list of strings
+    return [1.0 if "cat" in p else 0.0 for p in ctx.prompts]
+
+trainer = FlowGRPOTrainer(
+    model="stabilityai/stable-diffusion-3.5-medium",
+    reward_funcs=my_reward,
+    ...
+)
+```
+
+Multi-reward supports two aggregation modes via `reward_mode`:
+- `"weighted_sum"` (default) - weighted average of raw scores
+- `"advantage_level"` - normalize each reward to zero mean/unit variance before weighting (useful when reward scales differ)
 
 ## Key Configuration
 

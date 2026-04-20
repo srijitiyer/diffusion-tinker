@@ -80,6 +80,12 @@ class DiffusionDPOTrainer:
         print(f"Loading preference dataset: {self.config.dataset_name}...")
         hf_ds = load_dataset(self.config.dataset_name, split=self.config.dataset_split)
 
+        for col in [self.config.image_column_winner, self.config.image_column_loser, self.config.caption_column]:
+            if col not in hf_ds.column_names:
+                raise ValueError(
+                    f"Dataset has no '{col}' column. Available: {hf_ds.column_names}."
+                )
+
         pref_ds = PreferenceDataset(
             hf_dataset=hf_ds,
             winner_col=self.config.image_column_winner,

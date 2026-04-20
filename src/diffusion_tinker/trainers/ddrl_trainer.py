@@ -51,6 +51,12 @@ class DDRLTrainer(BaseDiffusionTrainer):
         else:
             ds = load_dataset(self.config.train_dataset, split=self.config.dataset_split)
 
+        if self.config.image_column not in ds.column_names:
+            raise ValueError(
+                f"Dataset has no '{self.config.image_column}' column. "
+                f"Available: {ds.column_names}. Set image_column in config."
+            )
+
         # Pre-encode images to latents
         transform = T.Compose(
             [

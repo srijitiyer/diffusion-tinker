@@ -116,6 +116,13 @@ class SFTTrainer:
         else:
             hf_ds = load_dataset(self.config.train_dataset, split=self.config.dataset_split)
 
+        for col in [self.config.image_column, self.config.caption_column]:
+            if col not in hf_ds.column_names:
+                raise ValueError(
+                    f"Dataset has no '{col}' column. Available: {hf_ds.column_names}. "
+                    f"Set image_column/caption_column in config."
+                )
+
         ds = _SFTDataset(hf_ds, self.config.image_column, self.config.caption_column, self.config.resolution)
         self.dataloader = DataLoader(
             ds,
