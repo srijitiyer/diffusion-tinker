@@ -51,10 +51,12 @@ trainer.train()
 |-----------|---------|-------|--------|
 | **FlowGRPO** | `FlowGRPOTrainer` | [arXiv:2505.05470](https://arxiv.org/abs/2505.05470) | Validated |
 | **DDRL** | `DDRLTrainer` | [arXiv:2512.04332](https://arxiv.org/abs/2512.04332) | Validated |
-| **DiffusionDPO** | `DiffusionDPOTrainer` | [arXiv:2311.12908](https://arxiv.org/abs/2311.12908) | Implemented |
-| **DRaFT** | `DRaFTTrainer` | [arXiv:2309.17400](https://arxiv.org/abs/2309.17400) | Implemented |
-| **DDPO/DPOK** | `DDPOTrainer` | [arXiv:2305.13301](https://arxiv.org/abs/2305.13301) | Implemented |
-| **SFT** | `SFTTrainer` | Standard denoising loss | Implemented |
+| **DiffusionDPO** | `DiffusionDPOTrainer` | [arXiv:2311.12908](https://arxiv.org/abs/2311.12908) | Smoke-tested |
+| **DRaFT** | `DRaFTTrainer` | [arXiv:2309.17400](https://arxiv.org/abs/2309.17400) | Smoke-tested |
+| **DDPO/DPOK** | `DDPOTrainer` | [arXiv:2305.13301](https://arxiv.org/abs/2305.13301) | Smoke-tested |
+| **SFT** | `SFTTrainer` | Standard denoising loss | Smoke-tested |
+
+*Validated* = reproduces paper-level results on SD3.5. *Smoke-tested* = runs end-to-end on SD3.5 (A5000) with sane loss/reward; full convergence runs pending.
 
 ## Supported Models
 
