@@ -48,11 +48,49 @@ class DRaFTTrainer:
         self.optimizer = torch.optim.AdamW(trainable_params, lr=config.learning_rate, weight_decay=config.weight_decay)
         print(f"Trainable params: {sum(p.numel() for p in trainable_params):,}")
 
+        self._embed_cache = {}
+        self._precompute_prompt_embeds()
+
     def _setup_model(self, model_id: str):
         from diffusion_tinker.models.model_setup import setup_sd3_model
         self.pipeline, self.transformer, self.vae, self.model_config = setup_sd3_model(
             model_id, self.config, self.device
         )
+        # DRaFT backprops through the denoising chain; gradient checkpointing
+        # recomputes the forward and the SD3 joint-attention blocks don't replay
+        # consistently, so it must stay off regardless of the config default.
+        self.transformer.disable_gradient_checkpointing()
+
+    def _precompute_prompt_embeds(self):
+        """Encode all training prompts once, then offload the text encoders.
+
+        SD3's text encoders (T5-XXL especially) are ~10GB resident. DRaFT trains
+        on a fixed prompt set and re-samples noise each step, so the embeddings
+        never change. Caching them and moving the encoders to CPU frees the VRAM
+        needed for the reward backward pass, which is what lets DRaFT fit on a
+        24GB consumer card.
+        """
+        if not self.train_prompts:
+            return
+        uniq = list(dict.fromkeys(self.train_prompts))
+        with torch.no_grad():
+            prompt_embeds, _, pooled_embeds, _ = self.pipeline.encode_prompt(
+                prompt=uniq,
+                prompt_2=None,
+                prompt_3=None,
+                negative_prompt=None,
+                do_classifier_free_guidance=False,
+                device=self.device,
+            )
+        for i, p in enumerate(uniq):
+            self._embed_cache[p] = (prompt_embeds[i].detach().cpu(), pooled_embeds[i].detach().cpu())
+
+        for name in ["text_encoder", "text_encoder_2", "text_encoder_3"]:
+            enc = getattr(self.pipeline, name, None)
+            if enc is not None:
+                enc.to("cpu")
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def _denoise_with_grad(self, prompts: list[str]) -> tuple[torch.Tensor, list]:
         """Run denoising with gradients through the last K steps."""
@@ -62,16 +100,22 @@ class DRaFTTrainer:
         batch_size = len(prompts)
         K = config.truncation_steps
 
-        prompt_embeds, negative_prompt_embeds, pooled_prompt_embeds, negative_pooled_prompt_embeds = (
-            self.pipeline.encode_prompt(
-                prompt=prompts,
-                prompt_2=None,
-                prompt_3=None,
-                negative_prompt=None,
-                do_classifier_free_guidance=False,
-                device=device,
-            )
-        )
+        missing = [p for p in prompts if p not in self._embed_cache]
+        if missing:
+            with torch.no_grad():
+                pe, _, ppe, _ = self.pipeline.encode_prompt(
+                    prompt=missing,
+                    prompt_2=None,
+                    prompt_3=None,
+                    negative_prompt=None,
+                    do_classifier_free_guidance=False,
+                    device=device,
+                )
+            for i, p in enumerate(missing):
+                self._embed_cache[p] = (pe[i].detach().cpu(), ppe[i].detach().cpu())
+
+        prompt_embeds = torch.stack([self._embed_cache[p][0] for p in prompts]).to(device, dtype)
+        pooled_prompt_embeds = torch.stack([self._embed_cache[p][1] for p in prompts]).to(device, dtype)
 
         latent_channels = self.pipeline.transformer.config.in_channels
         latents = torch.randn(
