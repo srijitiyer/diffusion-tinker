@@ -24,6 +24,19 @@ class BaseReward(ABC):
     def __call__(self, ctx: RewardContext) -> RewardOutput:
         return self._compute(ctx)
 
+    def differentiable_forward(self, images: torch.Tensor, prompts: list[str]) -> torch.Tensor | None:
+        """Compute reward on image tensors with gradient flow preserved.
+
+        Args:
+            images: (B, 3, H, W) float tensor in [0, 1], with gradients attached
+            prompts: list of prompt strings
+
+        Returns:
+            (B,) reward scores tensor, or None if this reward doesn't support
+            differentiable computation (DRaFT will fall back to PIL-based scoring).
+        """
+        return None
+
     def to(self, device: str | torch.device) -> BaseReward:
         self.device = torch.device(device)
         return self

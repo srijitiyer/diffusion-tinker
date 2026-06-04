@@ -57,6 +57,32 @@ class CLIPScoreReward(BaseReward):
 
         return RewardOutput(scores=scores.float().cpu())
 
+    def differentiable_forward(self, images: torch.Tensor, prompts: list[str]) -> torch.Tensor:
+        from torchvision.transforms.functional import normalize, resize
+
+        self._ensure_loaded()
+
+        images_resized = resize(images, [224, 224], antialias=True)
+        images_normalized = normalize(
+            images_resized,
+            mean=[0.48145466, 0.4578275, 0.40821073],
+            std=[0.26862954, 0.26130258, 0.27577711],
+        )
+
+        vision_out = self._clip.vision_model(pixel_values=images_normalized.to(self._clip.dtype))
+        embed = self._clip.visual_projection(vision_out.pooler_output)
+        embed = embed / torch.linalg.vector_norm(embed, dim=-1, keepdim=True)
+
+        tokenizer = self._processor.tokenizer
+        text_inputs = tokenizer(prompts, padding=True, truncation=True, max_length=77, return_tensors="pt")
+        text_inputs = {k: v.to(embed.device) for k, v in text_inputs.items()}
+        text_out = self._clip.text_model(**text_inputs)
+        text_features = self._clip.text_projection(text_out.pooler_output)
+        text_features = text_features / torch.linalg.vector_norm(text_features, dim=-1, keepdim=True)
+
+        scores = (embed * text_features.detach()).sum(dim=-1) * 100.0
+        return scores
+
     def to(self, device: str | torch.device) -> CLIPScoreReward:
         super().to(device)
         if self._clip is not None:

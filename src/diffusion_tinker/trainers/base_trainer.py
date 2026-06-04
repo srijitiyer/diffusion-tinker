@@ -10,9 +10,9 @@ from pathlib import Path
 import torch
 from peft import LoraConfig
 
+from diffusion_tinker.core.callbacks import TrainerCallback
 from diffusion_tinker.core.stat_tracking import PerPromptStatTracker
 from diffusion_tinker.core.trajectory import TrajectoryBatch
-from diffusion_tinker.models.sd3_patch import SD3ModelConfig, sd3_sample_with_logprob
 from diffusion_tinker.rewards.protocol import RewardContext, RewardFunc
 from diffusion_tinker.rewards.resolve import resolve_reward
 from diffusion_tinker.trainers.base_config import BaseDiffusionConfig
@@ -32,11 +32,15 @@ class BaseDiffusionTrainer(ABC):
         train_prompts: list[str] | None = None,
         reward_weights: list[float] | None = None,
         reward_mode: str = "weighted_sum",
+        reward_kwargs: dict | None = None,
+        callbacks: list[TrainerCallback] | None = None,
     ):
         self.config = config
         self.train_prompts = train_prompts or []
         self.global_step = 0
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.reward_kwargs = reward_kwargs or {}
+        self.callbacks = callbacks or []
 
         torch.manual_seed(config.seed)
         random.seed(config.seed)
@@ -63,18 +67,29 @@ class BaseDiffusionTrainer(ABC):
         print(f"Total params: {sum(p.numel() for p in self.transformer.parameters()):,}")
 
     def _setup_model(self, model_id: str):
-        from diffusers import StableDiffusion3Pipeline
+        if self.config.model_type == "auto":
+            self._model_type = "flux" if "flux" in model_id.lower() else "sd3"
+        else:
+            self._model_type = self.config.model_type
 
         dtype = torch.bfloat16 if self.config.mixed_precision == "bf16" else torch.float16
 
-        print(f"Loading {model_id}...")
-        self.pipeline = StableDiffusion3Pipeline.from_pretrained(model_id, torch_dtype=dtype)
+        print(f"Loading {model_id} (type={self._model_type})...")
+        if self._model_type == "flux":
+            from diffusers import FluxPipeline
+            from diffusion_tinker.models.flux_patch import FluxModelConfig
+            self.pipeline = FluxPipeline.from_pretrained(model_id, torch_dtype=dtype)
+            self.model_config = FluxModelConfig()
+        else:
+            from diffusers import StableDiffusion3Pipeline
+            from diffusion_tinker.models.sd3_patch import SD3ModelConfig
+            self.pipeline = StableDiffusion3Pipeline.from_pretrained(model_id, torch_dtype=dtype)
+            self.model_config = SD3ModelConfig()
         self.pipeline.to(self.device)
 
         self.transformer = self.pipeline.transformer
         self.vae = self.pipeline.vae
         self.scheduler = self.pipeline.scheduler
-        self.model_config = SD3ModelConfig()
 
         self.vae.eval()
         self.vae.requires_grad_(False)
@@ -82,7 +97,7 @@ class BaseDiffusionTrainer(ABC):
             self.pipeline.text_encoder.requires_grad_(False)
         if self.pipeline.text_encoder_2 is not None:
             self.pipeline.text_encoder_2.requires_grad_(False)
-        if self.pipeline.text_encoder_3 is not None:
+        if getattr(self.pipeline, "text_encoder_3", None) is not None:
             self.pipeline.text_encoder_3.requires_grad_(False)
 
         lora_config = LoraConfig(
@@ -112,18 +127,32 @@ class BaseDiffusionTrainer(ABC):
             batch = [p] * self.config.num_samples_per_prompt
             expanded_prompts.extend(batch)
 
-            output = sd3_sample_with_logprob(
-                pipeline=self.pipeline,
-                prompts=batch,
-                num_inference_steps=self.config.num_inference_steps,
-                guidance_scale=self.config.guidance_scale,
-                noise_level=self.config.noise_level,
-                height=self.config.resolution,
-                width=self.config.resolution,
-            )
+            if self._model_type == "flux":
+                from diffusion_tinker.models.flux_patch import flux_sample_with_logprob
+                output = flux_sample_with_logprob(
+                    pipeline=self.pipeline,
+                    prompts=batch,
+                    num_inference_steps=self.config.num_inference_steps,
+                    guidance_scale=self.config.guidance_scale,
+                    noise_level=self.config.noise_level,
+                    height=self.config.resolution,
+                    width=self.config.resolution,
+                )
+            else:
+                from diffusion_tinker.models.sd3_patch import sd3_sample_with_logprob
+                output = sd3_sample_with_logprob(
+                    pipeline=self.pipeline,
+                    prompts=batch,
+                    num_inference_steps=self.config.num_inference_steps,
+                    guidance_scale=self.config.guidance_scale,
+                    noise_level=self.config.noise_level,
+                    height=self.config.resolution,
+                    width=self.config.resolution,
+                )
             all_outputs.append(output)
 
-        has_neg = all_outputs[0].negative_prompt_embeds is not None
+        has_neg = all_outputs[0].negative_prompt_embeds is not None if hasattr(all_outputs[0], "negative_prompt_embeds") else False
+        has_img_ids = hasattr(all_outputs[0], "img_ids")
         trajectory = TrajectoryBatch(
             latents=torch.cat([o.latents_trajectory for o in all_outputs], dim=0),
             next_latents=torch.cat([o.next_latents_trajectory for o in all_outputs], dim=0),
@@ -133,16 +162,49 @@ class BaseDiffusionTrainer(ABC):
             pooled_embeds=torch.cat([o.pooled_embeds for o in all_outputs], dim=0),
             negative_prompt_embeds=torch.cat([o.negative_prompt_embeds for o in all_outputs], dim=0) if has_neg else None,
             negative_pooled_embeds=torch.cat([o.negative_pooled_embeds for o in all_outputs], dim=0) if has_neg else None,
+            img_ids=torch.cat([o.img_ids for o in all_outputs], dim=0) if has_img_ids else None,
+            txt_ids=all_outputs[0].txt_ids if has_img_ids else None,
             prompts=expanded_prompts,
             rewards=None,
             images=[img for o in all_outputs for img in o.images],
         )
 
-        ctx = RewardContext(images=trajectory.images, prompts=expanded_prompts, device=self.device)
+        final_latents = trajectory.next_latents[:, -1] if trajectory.next_latents is not None else None
+        metadata = dict(self.reward_kwargs)
+        ctx = RewardContext(
+            images=trajectory.images,
+            prompts=expanded_prompts,
+            device=self.device,
+            metadata=metadata,
+            latents=final_latents,
+            epoch=self.global_step,
+        )
         reward_output = self.reward_fn(ctx)
         trajectory.rewards = torch.nan_to_num(reward_output.scores, nan=0.0)
 
         return trajectory
+
+    def _replay_step(self, transformer, latent_t, next_latent_t, sigma, sigma_next,
+                      prompt_embeds, pooled_embeds, guidance_scale, noise_level,
+                      negative_prompt_embeds=None, negative_pooled_embeds=None,
+                      img_ids=None, txt_ids=None):
+        if self._model_type == "flux":
+            from diffusion_tinker.models.flux_patch import flux_replay_step
+            return flux_replay_step(
+                transformer=transformer, latent_t=latent_t, next_latent_t=next_latent_t,
+                sigma=sigma, sigma_next=sigma_next, prompt_embeds=prompt_embeds,
+                pooled_embeds=pooled_embeds, img_ids=img_ids, txt_ids=txt_ids,
+                guidance_scale=guidance_scale, noise_level=noise_level,
+            )
+        else:
+            from diffusion_tinker.models.sd3_patch import sd3_replay_step
+            return sd3_replay_step(
+                transformer=transformer, latent_t=latent_t, next_latent_t=next_latent_t,
+                sigma=sigma, sigma_next=sigma_next, prompt_embeds=prompt_embeds,
+                pooled_embeds=pooled_embeds, guidance_scale=guidance_scale,
+                noise_level=noise_level, negative_prompt_embeds=negative_prompt_embeds,
+                negative_pooled_embeds=negative_pooled_embeds,
+            )
 
     def _compute_advantages(self, trajectory: TrajectoryBatch) -> TrajectoryBatch:
         """Compute per-prompt normalized advantages."""
@@ -156,6 +218,10 @@ class BaseDiffusionTrainer(ABC):
         """Algorithm-specific training step. Must be implemented by subclass."""
         raise NotImplementedError
 
+    def _fire_callbacks(self, method: str, **kwargs):
+        for cb in self.callbacks:
+            getattr(cb, method)(self, **kwargs)
+
     def train(self):
         """Main training loop."""
         os.makedirs(self.config.output_dir, exist_ok=True)
@@ -164,13 +230,17 @@ class BaseDiffusionTrainer(ABC):
             raise ValueError("No training prompts provided. Pass train_prompts to the trainer.")
 
         print(f"Starting training: {self.config.num_epochs} epochs, {len(self.train_prompts)} prompts")
+        self._fire_callbacks("on_train_begin")
 
         for epoch in range(self.config.num_epochs):
+            self._fire_callbacks("on_epoch_begin", epoch=epoch)
+
             epoch_prompts = self.train_prompts.copy()
             random.shuffle(epoch_prompts)
             batch_prompts = epoch_prompts
 
             trajectory = self._sample_trajectories(batch_prompts)
+            self._fire_callbacks("on_sample_end", epoch=epoch, trajectory=trajectory)
 
             trajectory = self._compute_advantages(trajectory)
 
@@ -200,6 +270,8 @@ class BaseDiffusionTrainer(ABC):
                 log_str += f" | per_prompt=[{', '.join(per_prompt_rewards)}]"
                 print(log_str)
 
+            self._fire_callbacks("on_epoch_end", epoch=epoch, metrics=metrics)
+
             if epoch > 0 and epoch % self.config.save_every == 0:
                 self._save_checkpoint(epoch)
 
@@ -217,6 +289,7 @@ class BaseDiffusionTrainer(ABC):
                     break
 
         self._save_checkpoint(self.config.num_epochs)
+        self._fire_callbacks("on_train_end")
         print("Training complete.")
 
     def _save_checkpoint(self, epoch: int):
@@ -224,6 +297,7 @@ class BaseDiffusionTrainer(ABC):
         save_path.mkdir(parents=True, exist_ok=True)
         self.transformer.save_pretrained(str(save_path))
         print(f"Saved checkpoint to {save_path}")
+        self._fire_callbacks("on_save", epoch=epoch, path=str(save_path))
 
     @torch.no_grad()
     def _evaluate(self, epoch: int) -> float:
@@ -231,20 +305,37 @@ class BaseDiffusionTrainer(ABC):
         self.transformer.eval()
         eval_prompts = self.train_prompts[:4]
 
-        output = sd3_sample_with_logprob(
-            pipeline=self.pipeline,
-            prompts=eval_prompts,
-            num_inference_steps=self.config.num_eval_inference_steps,
-            guidance_scale=self.config.guidance_scale,
-            noise_level=0.0,
-            height=self.config.resolution,
-            width=self.config.resolution,
-        )
+        if self._model_type == "flux":
+            from diffusion_tinker.models.flux_patch import flux_sample_with_logprob
+            output = flux_sample_with_logprob(
+                pipeline=self.pipeline,
+                prompts=eval_prompts,
+                num_inference_steps=self.config.num_eval_inference_steps,
+                guidance_scale=self.config.guidance_scale,
+                noise_level=0.0,
+                height=self.config.resolution,
+                width=self.config.resolution,
+            )
+        else:
+            from diffusion_tinker.models.sd3_patch import sd3_sample_with_logprob
+            output = sd3_sample_with_logprob(
+                pipeline=self.pipeline,
+                prompts=eval_prompts,
+                num_inference_steps=self.config.num_eval_inference_steps,
+                guidance_scale=self.config.guidance_scale,
+                noise_level=0.0,
+                height=self.config.resolution,
+                width=self.config.resolution,
+            )
 
-        ctx = RewardContext(images=output.images, prompts=eval_prompts, device=self.device)
+        ctx = RewardContext(
+            images=output.images, prompts=eval_prompts, device=self.device,
+            metadata=dict(self.reward_kwargs),
+        )
         reward_output = self.reward_fn(ctx)
         scores = reward_output.scores
         mean_reward = scores.mean().item()
+        self._fire_callbacks("on_evaluate", epoch=epoch, mean_reward=mean_reward)
 
         per_prompt = " | ".join(f"{p[:20]}={s:.2f}" for p, s in zip(eval_prompts, scores.tolist()))
         print(f"Eval (epoch {epoch}): mean_reward={mean_reward:.3f} [{per_prompt}]")
@@ -254,13 +345,14 @@ class BaseDiffusionTrainer(ABC):
         for i, img in enumerate(output.images):
             img.save(eval_dir / f"sample_{i}.png")
 
-        if self.config.save_best and mean_reward > self._best_eval_reward:
+        if mean_reward > self._best_eval_reward:
             self._best_eval_reward = mean_reward
             self._evals_without_improvement = 0
-            best_path = Path(self.config.output_dir) / "checkpoint-best"
-            best_path.mkdir(parents=True, exist_ok=True)
-            self.transformer.save_pretrained(str(best_path))
-            print(f"New best eval reward: {mean_reward:.3f} (saved to {best_path})")
+            if self.config.save_best:
+                best_path = Path(self.config.output_dir) / "checkpoint-best"
+                best_path.mkdir(parents=True, exist_ok=True)
+                self.transformer.save_pretrained(str(best_path))
+                print(f"New best eval reward: {mean_reward:.3f} (saved to {best_path})")
         else:
             self._evals_without_improvement += 1
 

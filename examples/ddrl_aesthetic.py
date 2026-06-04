@@ -29,7 +29,7 @@ config = DDRLConfig(
     # DDRL-specific: forward KL regularization anchored to real images
     data_beta=0.01,
     train_dataset="yuvalkirstain/pickapic_v2",
-    use_monotonic_transform=True,
+    use_monotonic_transform=False,
     condition_dropout=0.2,
     # Training
     num_epochs=50,

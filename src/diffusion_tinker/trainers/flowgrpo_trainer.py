@@ -7,7 +7,6 @@ import random
 import torch
 
 from diffusion_tinker.core.trajectory import TrajectoryBatch
-from diffusion_tinker.models.sd3_patch import sd3_replay_step
 from diffusion_tinker.trainers.base_trainer import BaseDiffusionTrainer
 from diffusion_tinker.trainers.flowgrpo_config import FlowGRPOConfig
 
@@ -52,7 +51,7 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
 
             step_noise_level = config.noise_level if j < num_steps - 1 else 0.0
             with torch.autocast(device_type=device.type, dtype=autocast_dtype):
-                log_prob_new, prev_sample_mean = sd3_replay_step(
+                log_prob_new, prev_sample_mean = self._replay_step(
                     transformer=self.transformer,
                     latent_t=latent_t,
                     next_latent_t=next_latent_t,
@@ -64,6 +63,8 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
                     noise_level=step_noise_level,
                     negative_prompt_embeds=trajectory.negative_prompt_embeds,
                     negative_pooled_embeds=trajectory.negative_pooled_embeds,
+                    img_ids=trajectory.img_ids,
+                    txt_ids=trajectory.txt_ids,
                 )
 
             log_prob_old = trajectory.log_probs[:, j]
@@ -84,7 +85,7 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
                     self.transformer.disable_adapter_layers()
                     try:
                         with torch.autocast(device_type=device.type, dtype=autocast_dtype):
-                            _, prev_sample_mean_ref = sd3_replay_step(
+                            _, prev_sample_mean_ref = self._replay_step(
                                 transformer=self.transformer,
                                 latent_t=latent_t,
                                 next_latent_t=next_latent_t,
@@ -96,6 +97,8 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
                                 noise_level=step_noise_level,
                                 negative_prompt_embeds=trajectory.negative_prompt_embeds,
                                 negative_pooled_embeds=trajectory.negative_pooled_embeds,
+                                img_ids=trajectory.img_ids,
+                                txt_ids=trajectory.txt_ids,
                             )
                     finally:
                         self.transformer.enable_adapter_layers()
@@ -106,7 +109,7 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
                 noise_std = std_dev_t * torch.sqrt((-dt).clamp(min=1e-12))
 
                 diff = (prev_sample_mean.float() - prev_sample_mean_ref.float()).pow(2)
-                kl_per_sample = diff.mean(dim=(1, 2, 3)) / (2.0 * noise_std.pow(2) + 1e-12)
+                kl_per_sample = diff.mean(dim=tuple(range(1, diff.ndim))) / (2.0 * noise_std.pow(2) + 1e-12)
                 kl_loss = kl_per_sample.mean()
 
             loss = rl_loss + config.kl_beta * kl_loss

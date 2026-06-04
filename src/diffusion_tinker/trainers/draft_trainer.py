@@ -9,6 +9,7 @@ from pathlib import Path
 import torch
 from PIL import Image as PILImage
 
+from diffusion_tinker.core.callbacks import TrainerCallback
 from diffusion_tinker.rewards.protocol import RewardContext, RewardFunc
 from diffusion_tinker.rewards.resolve import resolve_reward
 from diffusion_tinker.trainers.draft_config import DRaFTConfig
@@ -23,60 +24,35 @@ class DRaFTTrainer:
         reward_funcs: RewardFunc,
         config: DRaFTConfig,
         train_prompts: list[str] | None = None,
+        reward_weights: list[float] | None = None,
+        reward_mode: str = "weighted_sum",
+        reward_kwargs: dict | None = None,
+        callbacks: list[TrainerCallback] | None = None,
     ):
         self.config = config
         self.train_prompts = train_prompts or []
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.global_step = 0
+        self.reward_kwargs = reward_kwargs or {}
+        self.callbacks = callbacks or []
 
         torch.manual_seed(config.seed)
         random.seed(config.seed)
 
         self._setup_model(model)
-        self.reward_fn = resolve_reward(reward_funcs, device=str(self.device))
+        self.reward_fn = resolve_reward(
+            reward_funcs, device=str(self.device), reward_weights=reward_weights, reward_mode=reward_mode
+        )
 
         trainable_params = [p for p in self.transformer.parameters() if p.requires_grad]
         self.optimizer = torch.optim.AdamW(trainable_params, lr=config.learning_rate, weight_decay=config.weight_decay)
         print(f"Trainable params: {sum(p.numel() for p in trainable_params):,}")
 
     def _setup_model(self, model_id: str):
-        from diffusers import StableDiffusion3Pipeline
-        from peft import LoraConfig
-
-        from diffusion_tinker.models.sd3_patch import SD3ModelConfig
-
-        dtype = torch.bfloat16 if self.config.mixed_precision == "bf16" else torch.float16
-
-        print(f"Loading {model_id}...")
-        self.pipeline = StableDiffusion3Pipeline.from_pretrained(model_id, torch_dtype=dtype)
-        self.pipeline.to(self.device)
-
-        self.transformer = self.pipeline.transformer
-        self.vae = self.pipeline.vae
-        self.model_config = SD3ModelConfig()
-
-        self.vae.eval()
-        self.vae.requires_grad_(False)
-        for enc in [self.pipeline.text_encoder, self.pipeline.text_encoder_2, self.pipeline.text_encoder_3]:
-            if enc is not None:
-                enc.requires_grad_(False)
-
-        lora_config = LoraConfig(
-            r=self.config.lora_rank,
-            lora_alpha=self.config.lora_alpha,
-            init_lora_weights="gaussian",
-            target_modules=self.model_config.lora_target_modules,
+        from diffusion_tinker.models.model_setup import setup_sd3_model
+        self.pipeline, self.transformer, self.vae, self.model_config = setup_sd3_model(
+            model_id, self.config, self.device
         )
-        self.transformer.add_adapter(lora_config)
-
-        if self.config.gradient_checkpointing:
-            self.transformer.enable_gradient_checkpointing()
-
-        for p in self.transformer.parameters():
-            if p.requires_grad:
-                p.data = p.data.float()
-
-        print(f"LoRA applied: rank={self.config.lora_rank}")
 
     def _denoise_with_grad(self, prompts: list[str]) -> tuple[torch.Tensor, list]:
         """Run denoising with gradients through the last K steps."""
@@ -152,7 +128,7 @@ class DRaFTTrainer:
 
         return images_tensor, pil_images
 
-    def _training_step(self, prompts: list[str]) -> dict[str, float]:
+    def _training_step(self, prompts: list[str], num_accum_steps: int = 1) -> dict[str, float]:
         config = self.config
         autocast_dtype = torch.bfloat16 if config.mixed_precision == "bf16" else torch.float16
 
@@ -161,64 +137,45 @@ class DRaFTTrainer:
 
         rewards = self._differentiable_reward(images_tensor, prompts)
 
-        loss = -rewards.mean()
-        loss.backward()
+        loss = -rewards.mean() / num_accum_steps
+        if loss.requires_grad:
+            loss.backward()
 
         return {
-            "loss": loss.item(),
+            "loss": loss.item() * num_accum_steps,
             "mean_reward": rewards.detach().mean().item(),
         }
 
     def _differentiable_reward(self, images: torch.Tensor, prompts: list[str]) -> torch.Tensor:
         """Compute reward on image tensor with gradient flow preserved."""
-        from torchvision.transforms.functional import normalize, resize
+        scores = self.reward_fn.differentiable_forward(images, prompts)
+        if scores is not None:
+            return scores
 
-        self.reward_fn._ensure_loaded()
+        import warnings
 
-        images_resized = resize(images, [224, 224], antialias=True)
-        images_normalized = normalize(
-            images_resized,
-            mean=[0.48145466, 0.4578275, 0.40821073],
-            std=[0.26862954, 0.26130258, 0.27577711],
+        warnings.warn(
+            "Reward does not support differentiable_forward(). "
+            "Gradients will NOT flow through the reward. "
+            "Use aesthetic or clip_score for DRaFT, or implement "
+            "differentiable_forward() on your custom reward.",
+            stacklevel=2,
         )
+        ctx = RewardContext(
+            images=[
+                PILImage.fromarray(
+                    (images[i].detach().cpu() * 255).clamp(0, 255).byte().permute(1, 2, 0).numpy()
+                )
+                for i in range(images.shape[0])
+            ],
+            prompts=prompts,
+            device=self.device,
+        )
+        return self.reward_fn._compute(ctx).scores.to(self.device)
 
-        if hasattr(self.reward_fn, "_clip"):
-            clip = self.reward_fn._clip
-            vision_out = clip.vision_model(pixel_values=images_normalized.to(clip.dtype))
-            embed = clip.visual_projection(vision_out.pooler_output)
-            embed = embed / torch.linalg.vector_norm(embed, dim=-1, keepdim=True)
-
-            if hasattr(self.reward_fn, "_mlp"):
-                scores = self.reward_fn._mlp(embed).squeeze(-1)
-            else:
-                tokenizer = self.reward_fn._processor.tokenizer
-                text_inputs = tokenizer(prompts, padding=True, truncation=True, max_length=77, return_tensors="pt")
-                text_inputs = {k: v.to(self.device) for k, v in text_inputs.items()}
-                text_out = clip.text_model(**text_inputs)
-                text_features = clip.text_projection(text_out.pooler_output)
-                text_features = text_features / torch.linalg.vector_norm(text_features, dim=-1, keepdim=True)
-                scores = (embed * text_features.detach()).sum(dim=-1) * 100.0
-        else:
-            import warnings
-
-            warnings.warn(
-                "DRaFT reward does not have a CLIP model. "
-                "Gradients will NOT flow through the reward. Use aesthetic or clip_score.",
-                stacklevel=2,
-            )
-            ctx = RewardContext(
-                images=[
-                    PILImage.fromarray(
-                        (images[i].detach().cpu() * 255).clamp(0, 255).byte().permute(1, 2, 0).numpy()
-                    )
-                    for i in range(images.shape[0])
-                ],
-                prompts=prompts,
-                device=self.device,
-            )
-            scores = self.reward_fn._compute(ctx).scores.to(self.device)
-
-        return scores
+    def _fire_callbacks(self, method: str, **kwargs):
+        for cb in self.callbacks:
+            getattr(cb, method)(self, **kwargs)
 
     def train(self):
         """Main training loop."""
@@ -229,8 +186,11 @@ class DRaFTTrainer:
             raise ValueError("No training prompts provided.")
 
         print(f"Starting DRaFT-{config.truncation_steps} training: {config.num_epochs} epochs")
+        self._fire_callbacks("on_train_begin")
 
         for epoch in range(config.num_epochs):
+            self._fire_callbacks("on_epoch_begin", epoch=epoch)
+
             epoch_prompts = self.train_prompts.copy()
             random.shuffle(epoch_prompts)
 
@@ -239,12 +199,13 @@ class DRaFTTrainer:
             epoch_reward = 0.0
             num_steps = 0
 
+            total_accum_steps = max(1, len(epoch_prompts) // config.gradient_accumulation_steps)
             for i in range(0, len(epoch_prompts), config.gradient_accumulation_steps):
                 batch = epoch_prompts[i : i + config.gradient_accumulation_steps]
                 if not batch:
                     continue
 
-                metrics = self._training_step(batch)
+                metrics = self._training_step(batch, num_accum_steps=total_accum_steps)
                 epoch_loss += metrics["loss"]
                 epoch_reward += metrics["mean_reward"]
                 num_steps += 1
@@ -257,16 +218,23 @@ class DRaFTTrainer:
             self.optimizer.zero_grad()
             self.global_step += 1
 
+            n = max(num_steps, 1)
+            epoch_metrics = {"loss": epoch_loss / n, "mean_reward": epoch_reward / n}
+
             if epoch % config.log_every == 0:
-                n = max(num_steps, 1)
-                print(f"Epoch {epoch} | loss={epoch_loss / n:.4f} | reward={epoch_reward / n:.3f}")
+                print(f"Epoch {epoch} | loss={epoch_metrics['loss']:.4f} | reward={epoch_metrics['mean_reward']:.3f}")
+
+            self._fire_callbacks("on_epoch_end", epoch=epoch, metrics=epoch_metrics)
 
             if epoch > 0 and epoch % config.save_every == 0:
                 save_path = Path(config.output_dir) / f"checkpoint-{epoch}"
                 save_path.mkdir(parents=True, exist_ok=True)
                 self.transformer.save_pretrained(str(save_path))
+                self._fire_callbacks("on_save", epoch=epoch, path=str(save_path))
 
         save_path = Path(config.output_dir) / f"checkpoint-{config.num_epochs}"
         save_path.mkdir(parents=True, exist_ok=True)
         self.transformer.save_pretrained(str(save_path))
+        self._fire_callbacks("on_save", epoch=config.num_epochs, path=str(save_path))
+        self._fire_callbacks("on_train_end")
         print("DRaFT training complete.")

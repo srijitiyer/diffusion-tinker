@@ -12,12 +12,23 @@ if TYPE_CHECKING:
 
 @dataclass
 class RewardContext:
-    """All information available to a reward function."""
+    """All information available to a reward function.
+
+    Basic fields (always populated):
+        images, prompts, device
+
+    Extended fields (populated when available):
+        latents: final denoised latent tensors from the sampling trajectory
+        epoch: current training epoch
+        metadata: arbitrary user data (populated from reward_kwargs)
+    """
 
     images: list[Image.Image]
     prompts: list[str]
     device: torch.device = torch.device("cpu")
     metadata: dict[str, Any] = field(default_factory=dict)
+    latents: torch.Tensor | None = None
+    epoch: int | None = None
 
 
 @dataclass

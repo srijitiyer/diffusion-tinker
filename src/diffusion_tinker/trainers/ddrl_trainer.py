@@ -12,7 +12,6 @@ import torchvision.transforms as T
 from diffusion_tinker.core.latent_utils import encode_to_latents
 from diffusion_tinker.core.noise_strategy import compute_flow_matching_loss
 from diffusion_tinker.core.trajectory import TrajectoryBatch
-from diffusion_tinker.models.sd3_patch import sd3_replay_step
 from diffusion_tinker.trainers.base_trainer import BaseDiffusionTrainer
 from diffusion_tinker.trainers.ddrl_config import DDRLConfig
 
@@ -21,10 +20,11 @@ class DDRLTrainer(BaseDiffusionTrainer):
 
     config: DDRLConfig
 
-    def __init__(self, model, reward_funcs, config, train_prompts=None, reward_weights=None, reward_mode="weighted_sum"):
+    def __init__(self, model, reward_funcs, config, train_prompts=None, reward_weights=None, reward_mode="weighted_sum", reward_kwargs=None, callbacks=None):
         super().__init__(
             model=model, reward_funcs=reward_funcs, config=config,
             train_prompts=train_prompts, reward_weights=reward_weights, reward_mode=reward_mode,
+            reward_kwargs=reward_kwargs, callbacks=callbacks,
         )
         self._data_latents = None
         self._setup_data()
@@ -141,7 +141,7 @@ class DDRLTrainer(BaseDiffusionTrainer):
             if has_signal:
                 step_noise_level = config.noise_level if j < num_steps - 1 else 0.0
                 with torch.autocast(device_type=device.type, dtype=autocast_dtype):
-                    log_prob_new, prev_sample_mean = sd3_replay_step(
+                    log_prob_new, prev_sample_mean = self._replay_step(
                         transformer=self.transformer,
                         latent_t=latent_t,
                         next_latent_t=next_latent_t,
@@ -153,6 +153,8 @@ class DDRLTrainer(BaseDiffusionTrainer):
                         noise_level=step_noise_level,
                         negative_prompt_embeds=trajectory.negative_prompt_embeds,
                         negative_pooled_embeds=trajectory.negative_pooled_embeds,
+                        img_ids=trajectory.img_ids,
+                        txt_ids=trajectory.txt_ids,
                     )
 
                 log_prob_old = trajectory.log_probs[:, j]

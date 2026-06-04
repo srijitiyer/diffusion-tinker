@@ -52,6 +52,25 @@ class ComposedReward(BaseReward):
 
         return RewardOutput(scores=combined, metadata=metadata)
 
+    def differentiable_forward(self, images: torch.Tensor, prompts: list[str]) -> torch.Tensor | None:
+        all_scores = []
+        for reward_fn in self.rewards:
+            scores = reward_fn.differentiable_forward(images, prompts)
+            if scores is None:
+                return None
+            all_scores.append(scores)
+
+        combined = torch.zeros_like(all_scores[0])
+        if self.mode == "advantage_level":
+            for scores, w in zip(all_scores, self.weights):
+                mean = scores.mean()
+                std = scores.std() if len(scores) > 1 else torch.tensor(0.0, device=scores.device)
+                combined = combined + w * (scores - mean) / (std + 1e-4)
+        else:
+            for scores, w in zip(all_scores, self.weights):
+                combined = combined + w * scores
+        return combined
+
     def to(self, device: str | torch.device) -> ComposedReward:
         super().to(device)
         for r in self.rewards:

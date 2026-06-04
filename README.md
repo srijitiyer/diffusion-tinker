@@ -58,10 +58,10 @@ trainer.train()
 
 ## Supported Models
 
-| Model | Architecture |
-|-------|-------------|
-| **SD3 / SD3.5** | MMDiT, flow matching |
-| **FLUX.1** | Hybrid transformer, flow matching |
+| Model | Architecture | Supported Trainers |
+|-------|-------------|-------------------|
+| **SD3 / SD3.5** | MMDiT, flow matching | All 6 trainers |
+| **FLUX.1** | Hybrid transformer, flow matching | FlowGRPO, DDRL, DDPO |
 
 ## Built-in Rewards
 
@@ -91,9 +91,62 @@ trainer = FlowGRPOTrainer(
 )
 ```
 
+`RewardContext` exposes everything a custom reward might need:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `images` | `list[PIL.Image]` | Generated images (always populated) |
+| `prompts` | `list[str]` | Corresponding prompts |
+| `device` | `torch.device` | Device for model computations |
+| `latents` | `Tensor \| None` | Final denoised latents from the trajectory |
+| `epoch` | `int \| None` | Current training epoch |
+| `metadata` | `dict` | User-defined data from `reward_kwargs` |
+
+Pass arbitrary data to your reward function via `reward_kwargs`:
+
+```python
+def my_reward(ctx):
+    threshold = ctx.metadata.get("threshold", 0.5)
+    target_style = ctx.metadata["target_style"]
+    # use ctx.latents for latent-space rewards, ctx.epoch for curriculum, etc.
+    ...
+
+trainer = FlowGRPOTrainer(
+    model="stabilityai/stable-diffusion-3.5-medium",
+    reward_funcs=my_reward,
+    reward_kwargs={"threshold": 0.8, "target_style": "watercolor"},
+    ...
+)
+```
+
 Multi-reward supports two aggregation modes via `reward_mode`:
 - `"weighted_sum"` (default) - weighted average of raw scores
 - `"advantage_level"` - normalize each reward to zero mean/unit variance before weighting (useful when reward scales differ)
+
+## Callbacks
+
+Hook into the training loop with `TrainerCallback`:
+
+```python
+from diffusion_tinker import TrainerCallback
+
+class WandbCallback(TrainerCallback):
+    def on_epoch_end(self, trainer, epoch, metrics):
+        wandb.log(metrics, step=epoch)
+
+    def on_evaluate(self, trainer, epoch, mean_reward):
+        wandb.log({"eval_reward": mean_reward}, step=epoch)
+
+    def on_save(self, trainer, epoch, path):
+        wandb.save(f"{path}/*")
+
+trainer = FlowGRPOTrainer(
+    ...,
+    callbacks=[WandbCallback()],
+)
+```
+
+Available hooks: `on_train_begin`, `on_train_end`, `on_epoch_begin`, `on_epoch_end`, `on_sample_end`, `on_evaluate`, `on_save`.
 
 ## Key Configuration
 
@@ -129,7 +182,7 @@ DDRL adds `data_beta` (forward KL weight) and `train_dataset` (required for data
 DDRLConfig(
     data_beta=0.01,
     train_dataset="yuvalkirstain/pickapic_v2",  # or local image folder
-    use_monotonic_transform=True,               # Theorem 3.1 from the paper
+    use_monotonic_transform=False,              # Theorem 3.1; enable only with strong data anchor
 )
 ```
 
@@ -140,6 +193,7 @@ See `examples/`:
 - `grpo_aesthetic.py` - FlowGRPO + aesthetic reward (simplest, good first test)
 - `grpo_ocr.py` - FlowGRPO + OCR reward (validated, 0.950 eval accuracy)
 - `flowgrpo_multi_reward.py` - FlowGRPO + aesthetic + CLIP multi-reward
+- `custom_reward.py` - Custom reward function with `reward_kwargs` and training callbacks
 - `ddrl_aesthetic.py` - DDRL with data-regularized training (requires dataset)
 - `dpo_pickapic.py` - DiffusionDPO on preference dataset
 - `draft_aesthetic.py` - DRaFT with direct reward backprop

@@ -19,12 +19,10 @@ class DDRLConfig(BaseDiffusionConfig):
 
     # DDRL-specific
     data_beta: float = 0.01
-    kl_beta: float = 0.0
-    condition_dropout: float = 0.2
 
     # Advantage computation
     beta_temp: float = 1.0  # temperature for advantage normalization
-    use_monotonic_transform: bool = True  # lambda(x) = -exp(-x) from Theorem 3.1
+    use_monotonic_transform: bool = False  # lambda(x) = -exp(-x) from Theorem 3.1; causes collapse without data anchor
 
     # Timestep sampling for data loss
     timestep_sampling: str = "logit_normal"

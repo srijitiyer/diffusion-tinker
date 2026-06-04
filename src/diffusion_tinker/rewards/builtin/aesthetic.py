@@ -83,6 +83,24 @@ class AestheticReward(BaseReward):
 
         return RewardOutput(scores=scores.float().cpu())
 
+    def differentiable_forward(self, images: torch.Tensor, prompts: list[str]) -> torch.Tensor:
+        from torchvision.transforms.functional import normalize, resize
+
+        self._ensure_loaded()
+
+        images_resized = resize(images, [224, 224], antialias=True)
+        images_normalized = normalize(
+            images_resized,
+            mean=[0.48145466, 0.4578275, 0.40821073],
+            std=[0.26862954, 0.26130258, 0.27577711],
+        )
+
+        vision_out = self._clip.vision_model(pixel_values=images_normalized.to(self._clip.dtype))
+        embed = self._clip.visual_projection(vision_out.pooler_output)
+        embed = embed / torch.linalg.vector_norm(embed, dim=-1, keepdim=True)
+        scores = self._mlp(embed).squeeze(-1)
+        return scores
+
     def to(self, device: str | torch.device) -> AestheticReward:
         super().to(device)
         if self._clip is not None:

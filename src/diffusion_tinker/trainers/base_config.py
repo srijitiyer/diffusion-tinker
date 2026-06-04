@@ -34,6 +34,9 @@ class BaseDiffusionConfig:
     clip_range: float = 0.2
     adv_clip_max: float = 5.0
 
+    # Model
+    model_type: str = "auto"  # "auto", "sd3", or "flux"
+
     # Memory
     mixed_precision: str = "bf16"
     gradient_checkpointing: bool = True

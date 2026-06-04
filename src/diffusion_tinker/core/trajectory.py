@@ -30,6 +30,8 @@ class TrajectoryBatch:
     prompts: list[str]
     negative_prompt_embeds: torch.Tensor | None = None
     negative_pooled_embeds: torch.Tensor | None = None
+    img_ids: torch.Tensor | None = None
+    txt_ids: torch.Tensor | None = None
     rewards: torch.Tensor | None = None
     advantages: torch.Tensor | None = None
     images: list[Image.Image] = field(default_factory=list)
@@ -48,6 +50,8 @@ class TrajectoryBatch:
             prompts=[self.prompts[i] for i in (range(len(self.prompts))[idx] if isinstance(idx, slice) else [idx])],
             negative_prompt_embeds=self.negative_prompt_embeds[idx] if self.negative_prompt_embeds is not None else None,
             negative_pooled_embeds=self.negative_pooled_embeds[idx] if self.negative_pooled_embeds is not None else None,
+            img_ids=self.img_ids[idx] if self.img_ids is not None else None,
+            txt_ids=self.txt_ids,
             rewards=self.rewards[idx] if self.rewards is not None else None,
             advantages=self.advantages[idx] if self.advantages is not None else None,
             images=[self.images[i] for i in (range(len(self.images))[idx] if isinstance(idx, slice) else [idx])]
@@ -66,6 +70,10 @@ class TrajectoryBatch:
             self.negative_prompt_embeds = self.negative_prompt_embeds.to(device)
         if self.negative_pooled_embeds is not None:
             self.negative_pooled_embeds = self.negative_pooled_embeds.to(device)
+        if self.img_ids is not None:
+            self.img_ids = self.img_ids.to(device)
+        if self.txt_ids is not None:
+            self.txt_ids = self.txt_ids.to(device)
         if self.rewards is not None:
             self.rewards = self.rewards.to(device)
         if self.advantages is not None:

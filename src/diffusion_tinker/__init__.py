@@ -13,6 +13,9 @@ _LAZY_IMPORTS = {
     "DRaFTTrainer": "diffusion_tinker.trainers.draft_trainer",
     "SFTConfig": "diffusion_tinker.trainers.sft_config",
     "SFTTrainer": "diffusion_tinker.trainers.sft_trainer",
+    "TrainerCallback": "diffusion_tinker.core.callbacks",
+    "RewardContext": "diffusion_tinker.rewards.protocol",
+    "RewardOutput": "diffusion_tinker.rewards.protocol",
 }
 
 

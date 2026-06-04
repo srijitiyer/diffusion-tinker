@@ -8,21 +8,21 @@ from pathlib import Path
 
 import torch
 import torch.nn.functional as F
-from peft import LoraConfig
 from torch.utils.data import DataLoader
 
+from diffusion_tinker.core.callbacks import TrainerCallback
 from diffusion_tinker.core.latent_utils import encode_to_latents
 from diffusion_tinker.core.preference_dataset import PreferenceDataset, preference_collate_fn
-from diffusion_tinker.models.sd3_patch import SD3ModelConfig
 from diffusion_tinker.trainers.diffusion_dpo_config import DiffusionDPOConfig
 
 
 class DiffusionDPOTrainer:
     """Trainer implementing DiffusionDPO for diffusion models."""
 
-    def __init__(self, model: str, config: DiffusionDPOConfig):
+    def __init__(self, model: str, config: DiffusionDPOConfig, callbacks: list[TrainerCallback] | None = None):
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.callbacks = callbacks or []
 
         torch.manual_seed(config.seed)
         random.seed(config.seed)
@@ -36,40 +36,10 @@ class DiffusionDPOTrainer:
         print(f"Trainable params: {sum(p.numel() for p in trainable_params):,}")
 
     def _setup_model(self, model_id: str):
-        from diffusers import StableDiffusion3Pipeline
-
-        dtype = torch.bfloat16 if self.config.mixed_precision == "bf16" else torch.float16
-
-        print(f"Loading {model_id}...")
-        self.pipeline = StableDiffusion3Pipeline.from_pretrained(model_id, torch_dtype=dtype)
-        self.pipeline.to(self.device)
-
-        self.transformer = self.pipeline.transformer
-        self.vae = self.pipeline.vae
-        self.model_config = SD3ModelConfig()
-
-        self.vae.eval()
-        self.vae.requires_grad_(False)
-        for enc in [self.pipeline.text_encoder, self.pipeline.text_encoder_2, self.pipeline.text_encoder_3]:
-            if enc is not None:
-                enc.requires_grad_(False)
-
-        lora_config = LoraConfig(
-            r=self.config.lora_rank,
-            lora_alpha=self.config.lora_alpha,
-            init_lora_weights="gaussian",
-            target_modules=self.model_config.lora_target_modules,
+        from diffusion_tinker.models.model_setup import setup_sd3_model
+        self.pipeline, self.transformer, self.vae, self.model_config = setup_sd3_model(
+            model_id, self.config, self.device
         )
-        self.transformer.add_adapter(lora_config)
-
-        if self.config.gradient_checkpointing:
-            self.transformer.enable_gradient_checkpointing()
-
-        for p in self.transformer.parameters():
-            if p.requires_grad:
-                p.data = p.data.float()
-
-        print(f"LoRA applied: rank={self.config.lora_rank}, alpha={self.config.lora_alpha}")
 
     def _setup_data(self):
         if self.config.dataset_name is None:
@@ -202,10 +172,15 @@ class DiffusionDPOTrainer:
             "implicit_reward": inside_sigmoid.mean().item(),
         }, loss
 
+    def _fire_callbacks(self, method: str, **kwargs):
+        for cb in self.callbacks:
+            getattr(cb, method)(self, **kwargs)
+
     def train(self):
         """Step-based training loop over preference pairs."""
         os.makedirs(self.config.output_dir, exist_ok=True)
         print(f"Starting DiffusionDPO training: {self.config.max_train_steps} steps")
+        self._fire_callbacks("on_train_begin")
 
         self.transformer.train()
         data_iter = iter(self.dataloader)
@@ -234,11 +209,13 @@ class DiffusionDPOTrainer:
                 for k, v in metrics.items():
                     log_str += f" | {k}={v:.4f}"
                 print(log_str)
+                self._fire_callbacks("on_epoch_end", epoch=global_step, metrics=metrics)
 
             if global_step % 500 == 0:
                 self._save_checkpoint(global_step)
 
         self._save_checkpoint(global_step)
+        self._fire_callbacks("on_train_end")
         print("DiffusionDPO training complete.")
 
     def _save_checkpoint(self, step: int):
@@ -246,3 +223,4 @@ class DiffusionDPOTrainer:
         save_path.mkdir(parents=True, exist_ok=True)
         self.transformer.save_pretrained(str(save_path))
         print(f"Saved checkpoint to {save_path}")
+        self._fire_callbacks("on_save", epoch=step, path=str(save_path))
