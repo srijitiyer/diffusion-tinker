@@ -176,7 +176,13 @@ class DRaFTTrainer:
         config = self.config
         autocast_dtype = torch.bfloat16 if config.mixed_precision == "bf16" else torch.float16
 
-        with torch.autocast(device_type=self.device.type, dtype=autocast_dtype):
+        # cache_enabled=False is required: _denoise_with_grad runs a no_grad
+        # warmup loop before the gradient-tracked steps, both inside this
+        # autocast. With caching on, autocast stores the detached bf16 cast of
+        # each float32 LoRA weight during the warmup and reuses it in the grad
+        # loop, so gradients never reach the LoRA params and the model silently
+        # never trains. Disabling the cache forces a grad-tracked re-cast.
+        with torch.autocast(device_type=self.device.type, dtype=autocast_dtype, cache_enabled=False):
             images_tensor, pil_images = self._denoise_with_grad(prompts)
 
         rewards = self._differentiable_reward(images_tensor, prompts)
