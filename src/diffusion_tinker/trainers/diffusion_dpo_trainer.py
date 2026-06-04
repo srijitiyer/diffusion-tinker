@@ -137,7 +137,7 @@ class DiffusionDPOTrainer:
 
         # reference model = base model with LoRA disabled
         with torch.no_grad():
-            self.transformer.disable_adapter_layers()
+            self.transformer.disable_adapters()
             try:
                 with torch.autocast(device_type=device.type, dtype=autocast_dtype):
                     v_ref_w = self.transformer(
@@ -155,7 +155,7 @@ class DiffusionDPOTrainer:
                         return_dict=False,
                     )[0]
             finally:
-                self.transformer.enable_adapter_layers()
+                self.transformer.enable_adapters()
 
         loss_w_model = (v_target_w.float() - v_pred_w.float()).pow(2).mean(dim=[1, 2, 3])
         loss_w_ref = (v_target_w.float() - v_ref_w.float()).pow(2).mean(dim=[1, 2, 3])
