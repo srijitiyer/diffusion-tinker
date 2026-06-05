@@ -77,7 +77,7 @@ class DDPOTrainer(BaseDiffusionTrainer):
                 kl_loss = torch.tensor(0.0, device=device)
                 if config.kl_beta > 0:
                     with torch.no_grad():
-                        self.transformer.disable_adapter_layers()
+                        self.transformer.disable_adapters()
                         try:
                             with torch.autocast(device_type=device.type, dtype=autocast_dtype):
                                 _, prev_sample_mean_ref = self._replay_step(
@@ -96,7 +96,7 @@ class DDPOTrainer(BaseDiffusionTrainer):
                                     txt_ids=trajectory.txt_ids,
                                 )
                         finally:
-                            self.transformer.enable_adapter_layers()
+                            self.transformer.enable_adapters()
 
                     sigma_val = sigma.float().clamp(max=0.9999)
                     dt = (sigma_next - sigma).float()
