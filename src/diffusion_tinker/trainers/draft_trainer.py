@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import random
 from pathlib import Path
@@ -163,7 +164,9 @@ class DRaFTTrainer:
             latents = latents + noise_pred * dt
 
         latents_decoded = latents / self.vae.config.scaling_factor + self.vae.config.shift_factor
-        images_tensor = self.vae.decode(latents_decoded, return_dict=False)[0].clamp(0, 1)
+        # VAE decode is [-1, 1]; rescale to [0, 1] (the range the reward expects)
+        # before clamping, else ~55% of pixels (everything <0) crush to black.
+        images_tensor = (self.vae.decode(latents_decoded, return_dict=False)[0] / 2 + 0.5).clamp(0, 1)
 
         with torch.no_grad():
             images_np = (images_tensor * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
@@ -249,7 +252,10 @@ class DRaFTTrainer:
             epoch_reward = 0.0
             num_steps = 0
 
-            total_accum_steps = max(1, len(epoch_prompts) // config.gradient_accumulation_steps)
+            # ceil, not floor: range(0, N, step) runs ceil(N/step) iterations,
+            # so the loss normalizer must match the iteration count or the
+            # effective LR scales with the prompt count.
+            total_accum_steps = max(1, math.ceil(len(epoch_prompts) / config.gradient_accumulation_steps))
             for i in range(0, len(epoch_prompts), config.gradient_accumulation_steps):
                 batch = epoch_prompts[i : i + config.gradient_accumulation_steps]
                 if not batch:
