@@ -40,6 +40,11 @@ class BaseDiffusionConfig:
     # Memory
     mixed_precision: str = "bf16"
     gradient_checkpointing: bool = True
+    # Offload the (frozen) text encoders to CPU during the gradient-tracked
+    # training step, keeping them on GPU only for sampling/eval. Frees ~10GB
+    # (T5-XXL) so more samples/larger replay batches fit on a 24GB card, at the
+    # cost of a per-epoch CPU<->GPU transfer. Off by default.
+    offload_text_encoders: bool = False
 
     # Output
     output_dir: str = "./output"

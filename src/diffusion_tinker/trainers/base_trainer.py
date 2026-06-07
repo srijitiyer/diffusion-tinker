@@ -119,6 +119,8 @@ class BaseDiffusionTrainer(ABC):
     @torch.no_grad()
     def _sample_trajectories(self, prompts: list[str]) -> TrajectoryBatch:
         self.transformer.eval()
+        if self.config.offload_text_encoders:
+            self._set_text_encoders_device(self.device)
 
         all_outputs = []
         expanded_prompts: list[str] = []
@@ -182,6 +184,11 @@ class BaseDiffusionTrainer(ABC):
         reward_output = self.reward_fn(ctx)
         trajectory.rewards = torch.nan_to_num(reward_output.scores, nan=0.0)
 
+        if self.config.offload_text_encoders:
+            self._set_text_encoders_device("cpu")
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
         return trajectory
 
     def _replay_step(self, transformer, latent_t, next_latent_t, sigma, sigma_next,
@@ -205,6 +212,14 @@ class BaseDiffusionTrainer(ABC):
                 noise_level=noise_level, negative_prompt_embeds=negative_prompt_embeds,
                 negative_pooled_embeds=negative_pooled_embeds,
             )
+
+    def _set_text_encoders_device(self, device):
+        """Move the (frozen) text encoders to a device. Used to offload them to
+        CPU during the gradient step when config.offload_text_encoders is set."""
+        for name in ["text_encoder", "text_encoder_2", "text_encoder_3"]:
+            enc = getattr(self.pipeline, name, None)
+            if enc is not None:
+                enc.to(device)
 
     def _compute_advantages(self, trajectory: TrajectoryBatch) -> TrajectoryBatch:
         """Compute per-prompt normalized advantages."""
@@ -303,6 +318,8 @@ class BaseDiffusionTrainer(ABC):
     def _evaluate(self, epoch: int) -> float:
         """Generate eval images and compute reward stats. Returns mean reward."""
         self.transformer.eval()
+        if self.config.offload_text_encoders:
+            self._set_text_encoders_device(self.device)
         eval_prompts = self.train_prompts[:4]
 
         if self._model_type == "flux":
