@@ -65,6 +65,13 @@ def sd3_sample_with_logprob(
     dtype = pipeline.transformer.dtype
     batch_size = len(prompts)
     do_cfg = guidance_scale > 1.0
+    # Match the autocast used during replay (see *_trainer._training_step). The
+    # trainable LoRA params are float32; without autocast the sampling forward
+    # runs them in fp32 while replay casts to bf16, so the same policy produces
+    # different noise_pred -> a biased importance ratio (~0.97 instead of 1.0)
+    # that corrupts the PPO gradient. Aligning the precision makes the ratio
+    # unbiased at the first PPO step.
+    autocast_dtype = torch.bfloat16 if dtype == torch.bfloat16 else torch.float16
 
     (
         prompt_embeds,
@@ -111,13 +118,14 @@ def sd3_sample_with_logprob(
             model_prompt_embeds = prompt_embeds
             model_pooled_embeds = pooled_prompt_embeds
 
-        noise_pred = pipeline.transformer(
-            hidden_states=latent_model_input,
-            timestep=sigma_input * 1000.0,
-            encoder_hidden_states=model_prompt_embeds,
-            pooled_projections=model_pooled_embeds,
-            return_dict=False,
-        )[0]
+        with torch.autocast(device_type=device.type, dtype=autocast_dtype, cache_enabled=False):
+            noise_pred = pipeline.transformer(
+                hidden_states=latent_model_input,
+                timestep=sigma_input * 1000.0,
+                encoder_hidden_states=model_prompt_embeds,
+                pooled_projections=model_pooled_embeds,
+                return_dict=False,
+            )[0]
 
         if do_cfg:
             noise_pred_uncond, noise_pred_cond = noise_pred.chunk(2)
@@ -225,7 +233,9 @@ def _decode_latents(pipeline: StableDiffusion3Pipeline, latents: torch.Tensor) -
     """Decode latents to pixel space with SD3 normalization."""
     latents = latents / pipeline.vae.config.scaling_factor + pipeline.vae.config.shift_factor
     images = pipeline.vae.decode(latents, return_dict=False)[0]
-    return images.clamp(0, 1)
+    # SD3 VAE decode returns pixels in [-1, 1]; rescale to [0, 1] before clamping.
+    # Without the /2+0.5 the clamp crushes ~55% of pixels (everything <0) to black.
+    return (images / 2 + 0.5).clamp(0, 1)
 
 
 def _tensor_to_pil(images: torch.Tensor) -> list[Image.Image]:

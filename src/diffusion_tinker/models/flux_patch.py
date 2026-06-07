@@ -132,7 +132,13 @@ def flux_sample_with_logprob(
     all_next_latents = []
     all_log_probs = []
 
-    guidance = torch.full((batch_size,), guidance_scale, device=device, dtype=dtype)
+    # FLUX.1-dev embeds a guidance scalar (guidance_embeds=True); FLUX.1-schnell
+    # is not guidance-distilled and rejects a guidance tensor, so pass None there.
+    use_guidance = getattr(pipeline.transformer.config, "guidance_embeds", True)
+    guidance = torch.full((batch_size,), guidance_scale, device=device, dtype=dtype) if use_guidance else None
+    # Match replay precision (float32 LoRA + bf16 base) so the importance ratio
+    # is unbiased - see the equivalent note in sd3_patch.
+    autocast_dtype = torch.bfloat16 if dtype == torch.bfloat16 else torch.float16
 
     for i, sigma in enumerate(sigmas[:-1]):
         sigma_next = sigmas[i + 1]
@@ -140,16 +146,17 @@ def flux_sample_with_logprob(
 
         timestep = sigma.expand(batch_size)
 
-        noise_pred = pipeline.transformer(
-            hidden_states=latents,
-            timestep=timestep,
-            encoder_hidden_states=prompt_embeds,
-            pooled_projections=pooled_prompt_embeds,
-            img_ids=img_ids,
-            txt_ids=txt_ids,
-            guidance=guidance,
-            return_dict=False,
-        )[0]
+        with torch.autocast(device_type=device.type, dtype=autocast_dtype, cache_enabled=False):
+            noise_pred = pipeline.transformer(
+                hidden_states=latents,
+                timestep=timestep,
+                encoder_hidden_states=prompt_embeds,
+                pooled_projections=pooled_prompt_embeds,
+                img_ids=img_ids,
+                txt_ids=txt_ids,
+                guidance=guidance,
+                return_dict=False,
+            )[0]
 
         step_noise_level = noise_level if i < len(sigmas) - 2 else 0.0
         sigma_batch = sigma.expand(batch_size)
@@ -170,7 +177,8 @@ def flux_sample_with_logprob(
 
     latents_spatial = _unpack_latents(latents, height, width, channels=latent_channels)
     latents_spatial = latents_spatial / pipeline.vae.config.scaling_factor + pipeline.vae.config.shift_factor
-    images_tensor = pipeline.vae.decode(latents_spatial, return_dict=False)[0].clamp(0, 1)
+    # VAE decode is [-1, 1]; rescale to [0, 1] before clamping (see sd3_patch).
+    images_tensor = (pipeline.vae.decode(latents_spatial, return_dict=False)[0] / 2 + 0.5).clamp(0, 1)
 
     images_np = (images_tensor * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
     images_np = images_np.transpose(0, 2, 3, 1)
@@ -207,7 +215,8 @@ def flux_replay_step(
     device = latent_t.device
     dtype = latent_t.dtype
 
-    guidance = torch.full((batch_size,), guidance_scale, device=device, dtype=dtype)
+    use_guidance = getattr(transformer.config, "guidance_embeds", True)
+    guidance = torch.full((batch_size,), guidance_scale, device=device, dtype=dtype) if use_guidance else None
     timestep = sigma.expand(batch_size)
 
     noise_pred = transformer(
