@@ -175,6 +175,8 @@ FlowGRPOConfig(
     # Memory
     gradient_checkpointing=True,
     mixed_precision="bf16",
+    offload_text_encoders=False,  # move text encoders to CPU during the grad step
+                                  # (frees ~10GB for larger sample batches on 24GB)
 )
 ```
 
