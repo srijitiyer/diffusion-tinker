@@ -119,7 +119,10 @@ class OCRReward(BaseReward):
         if not target_norm:
             return 0.0
 
-        if target_norm in recognized_norm:
+        # Exact or near-exact substring match scores 1.0, but guard against a
+        # short target matching as a substring of much longer recognized text
+        # (e.g. "cat" inside "concatenate"), which would be a false positive.
+        if target_norm in recognized_norm and len(recognized_norm) <= 1.5 * len(target_norm):
             return 1.0
 
         dist = _edit_distance(recognized_norm, target_norm)

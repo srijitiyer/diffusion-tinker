@@ -35,8 +35,6 @@ class PerPromptStatTracker:
             indices = [i for i, p in enumerate(prompts) if p == prompt]
             group_rewards = rewards[indices]
 
-            self.stats[prompt].extend(group_rewards.tolist())
-
             mean = group_rewards.mean()
             # std() on a single element returns NaN with Bessel correction
             # Use std(correction=0) for groups of 1, matching FlowGRPO behavior
