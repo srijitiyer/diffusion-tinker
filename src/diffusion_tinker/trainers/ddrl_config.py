@@ -13,8 +13,7 @@ class DDRLConfig(BaseDiffusionConfig):
     which reduces to the standard diffusion denoising loss. Key parameters:
 
     - data_beta: weight of the diffusion loss (forward KL). Higher = more conservative.
-    - kl_beta: weight of reverse KL. Set to 0.0 for DDRL (the key innovation).
-    - condition_dropout: probability of dropping text condition during data loss (enables CFG).
+    - train_dataset: real-image anchor for the forward-KL data term.
     """
 
     # DDRL-specific

@@ -30,7 +30,6 @@ config = DDRLConfig(
     data_beta=0.01,
     train_dataset="yuvalkirstain/pickapic_v2",
     use_monotonic_transform=False,
-    condition_dropout=0.2,
     # Training
     num_epochs=50,
     save_every=10,
