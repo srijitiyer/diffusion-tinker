@@ -22,6 +22,8 @@ class ComposedReward(BaseReward):
         dtype: torch.dtype = torch.float32,
     ):
         super().__init__(device=device, dtype=dtype)
+        if not rewards:
+            raise ValueError("ComposedReward requires at least one reward.")
         self.rewards = rewards
         self.weights = weights or [1.0 / len(rewards)] * len(rewards)
         self.mode = mode
