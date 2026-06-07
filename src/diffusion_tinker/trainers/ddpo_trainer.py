@@ -100,7 +100,9 @@ class DDPOTrainer(BaseDiffusionTrainer):
 
                     sigma_val = sigma.float().clamp(max=0.9999)
                     dt = (sigma_next - sigma).float()
-                    std_dev_t = torch.sqrt(sigma_val / (1.0 - sigma_val)) * config.noise_level
+                    # Match the noise level the replay step used for the mean
+                    # (step_noise_level, 0 on the final step) for a consistent KL.
+                    std_dev_t = torch.sqrt(sigma_val / (1.0 - sigma_val)) * step_noise_level
                     noise_std = std_dev_t * torch.sqrt((-dt).clamp(min=1e-12))
 
                     diff = (prev_sample_mean.float() - prev_sample_mean_ref.float()).pow(2)
