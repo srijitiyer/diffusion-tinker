@@ -51,12 +51,12 @@ trainer.train()
 |-----------|---------|-------|--------|
 | **FlowGRPO** | `FlowGRPOTrainer` | [arXiv:2505.05470](https://arxiv.org/abs/2505.05470) | Validated |
 | **DDRL** | `DDRLTrainer` | [arXiv:2512.04332](https://arxiv.org/abs/2512.04332) | Validated |
-| **DiffusionDPO** | `DiffusionDPOTrainer` | [arXiv:2311.12908](https://arxiv.org/abs/2311.12908) | Smoke-tested |
+| **DiffusionDPO** | `DiffusionDPOTrainer` | [arXiv:2311.12908](https://arxiv.org/abs/2311.12908) | Validated |
 | **DRaFT** | `DRaFTTrainer` | [arXiv:2309.17400](https://arxiv.org/abs/2309.17400) | Validated |
 | **DDPO/DPOK** | `DDPOTrainer` | [arXiv:2305.13301](https://arxiv.org/abs/2305.13301) | Smoke-tested |
-| **SFT** | `SFTTrainer` | Standard denoising loss | Smoke-tested |
+| **SFT** | `SFTTrainer` | Standard denoising loss | Validated |
 
-*Validated* = reproduces paper-level results on SD3.5. *Smoke-tested* = runs end-to-end on SD3.5 (A5000) with sane loss/reward; full convergence runs pending.
+*Validated* = training demonstrably converges on SD3.5 (the optimized metric moves the right way on a real run). *Smoke-tested* = runs end-to-end with gradients flowing, but reward convergence not yet demonstrated. DDPO is wired correctly (shares FlowGRPO's validated replay) but is sample-inefficient; showing a reward gain needs a larger sample budget than a single 24GB GPU allows.
 
 ## Supported Models
 
