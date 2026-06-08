@@ -37,9 +37,9 @@ This note collects the reproduction results. Every number is from a real run on 
 FlowGRPO     & OCR text rendering        & \textbf{1.00} best eval accuracy & paper 0.823--0.845 \\
 DRaFT        & Aesthetic (LAION)         & 5.9 $\rightarrow$ 9.6 mean reward & --- \\
 DiffusionDPO & Preference (real vs.\ noise) & implicit reward 0 $\rightarrow$ 60 & --- \\
-DDRL         & Aesthetic + data anchor   & 3.77 $\rightarrow$ 3.89, stable & --- \\
 SFT          & Naruto denoising          & eval loss 0.189 $\rightarrow$ 0.185 & --- \\
-DDPO/DPOK    & Aesthetic                 & ratio corrected to $\sim$1.0; see \S\ref{sec:limits} & --- \\
+DDRL         & Aesthetic + data anchor   & stable, no collapse; reward sample-limited & see \S\ref{sec:limits} \\
+DDPO/DPOK    & Aesthetic                 & ratio corrected to $\sim$1.0; reward sample-limited & see \S\ref{sec:limits} \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -47,19 +47,25 @@ DDPO/DPOK    & Aesthetic                 & ratio corrected to $\sim$1.0; see \S\
 \begin{figure}[h]
 \centering
 \includegraphics[width=\textwidth]{figures/repro_curves.pdf}
-\caption{Training curves on the fixed code. FlowGRPO+OCR reaches a perfect eval accuracy well above the paper baselines; DRaFT climbs smoothly on aesthetics; DiffusionDPO's implicit reward separates winners from losers within a few dozen steps; DDRL improves steadily without collapsing; FLUX.1-schnell improves modestly. All curves are single runs.}
+\caption{Training curves on the fixed code. FlowGRPO+OCR reaches a perfect eval accuracy well above the paper baselines, and DRaFT climbs smoothly on aesthetics; DiffusionDPO's implicit reward separates winners from losers within a few dozen steps. The bottom-right and DDRL panels show the online RL methods on a scalar reward: stable but sample-limited (\S\ref{sec:limits}), not a clean climb. All curves are single runs.}
 \label{fig:curves}
 \end{figure}
 
 \textbf{FlowGRPO + OCR} is the headline. Trained to render readable text (prompts like \emph{A sign that says ``HELLO''}), it reaches a perfect 1.00 evaluation accuracy, against 0.823 reported for DDRL and 0.845 for FlowGRPO in the original work. The eval set is small (eight prompts, each scored pass/fail by an OCR model), so the curve is coarse and oscillates once it saturates; \code{save\_best} keeps the perfect checkpoint. Reproduce with:
 \begin{quote}\code{FlowGRPOTrainer(model="stabilityai/stable-diffusion-3.5-medium", reward\_funcs="ocr", train\_prompts=[...], config=FlowGRPOConfig(num\_samples\_per\_prompt=2, num\_epochs=40))}\end{quote}
 
-\textbf{DRaFT + aesthetic} gives the cleanest curve, a smooth climb from 5.9 to 9.6 on the LAION aesthetic predictor over 40 epochs (DRaFT-4, learning rate $5\times10^{-4}$). \textbf{DiffusionDPO} learns its preference within a few dozen steps: trained on (real image, noise image) pairs, the winner's denoising loss drops relative to the frozen reference while the loser's rises, which is exactly the behavior the objective rewards. \textbf{DDRL} improves aesthetics while its data-anchor term keeps it from drifting off the base distribution, and \textbf{SFT} reduces the held-out denoising loss measured at fixed timesteps.
+\textbf{DRaFT + aesthetic} gives the cleanest curve, a smooth climb from 5.9 to 9.6 on the LAION aesthetic predictor over 40 epochs (DRaFT-4, learning rate $5\times10^{-4}$). \textbf{DiffusionDPO} learns its preference within a few dozen steps: trained on (real image, noise image) pairs, the winner's denoising loss drops relative to the frozen reference while the loser's rises, which is exactly the behavior the objective rewards. \textbf{SFT} reduces the held-out denoising loss measured at fixed timesteps.
+
+The common thread among these four is a strong, dense learning signal: DRaFT differentiates the reward directly, DiffusionDPO works from explicit preference pairs, OCR gives a near-binary reward per prompt, and SFT is plain supervised denoising. The online RL methods that have to discover reward from samples (\S\ref{sec:limits}) are a different story at this compute budget.
 
 \section{Limitations}
 \label{sec:limits}
 
-\textbf{DDPO} is reported as mechanism-only on purpose. After the precision fix its importance ratio is $\sim$1.0 and gradients flow, and it shares FlowGRPO's verified replay code, so the implementation is correct. But PPO is sample-hungry and the reward does not visibly climb at the batch size a single 24\,GB card allows. It is included as the original diffusion RL method, with that stated plainly rather than dressed up.
+The online RL methods that optimize a scalar aesthetic reward by sampling (DDPO, DDRL, and FlowGRPO on FLUX) behave differently from the four above. Their implementations are verified, but a scalar reward is a weak, sample-hungry signal, and at the batch size a single card allows the reward does not move much. I report these honestly rather than dress them up.
+
+\textbf{DDPO} has the right mechanism after the precision fix: importance ratio $\sim$1.0, gradients flowing, and it shares FlowGRPO's verified replay code. But the reward stays flat at this sample budget, so I claim the mechanism, not a curve. It is here as the original diffusion RL method.
+
+\textbf{DDRL} adds a forward-KL data-anchor term to that same kind of RL. The aesthetic reward only drifts (it oscillates around 3.7--3.8 over 30 epochs, no net climb), again because the signal is weak at this budget, but the thing DDRL is actually for does hold: the anchor keeps training stable, with none of the collapse that unregularized reward optimization tends toward. That stability is the validated property here, not a reward number.
 
 \textbf{FLUX} runs end-to-end on FLUX.1-schnell with the whole code path verified at runtime (auto-detection, packed latents, sampling/replay log-probs, schnell guidance, decode). The eval aesthetic reward improves from 6.05 to a best of 6.39, but noisily: schnell is a four-step \emph{distilled} model not built for the stochastic sampling these methods rely on, and its importance ratio sits near 0.92. The non-distilled FLUX.1-dev would be a better RL target and is the obvious follow-up.
 

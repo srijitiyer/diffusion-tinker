@@ -10,7 +10,7 @@ All results on **Stable Diffusion 3.5-Medium**, single **NVIDIA A5000 (24GB)**, 
 | **SFT** | Naruto denoising | fixed-timestep eval loss, 300 steps | 0.189 → 0.185 | Validated |
 | **DiffusionDPO** | Preference (real vs noise) | implicit reward, 200 steps | 0 → 60.5 (winner loss ↓, loser ↑) | Validated |
 | **FlowGRPO** | OCR text rendering | eval OCR accuracy | 0.64 (ep 5) → **1.00 best** (ep 10, saved); 0.70–1.00 thereafter (3–4 of 4 prompts), early-stopped ep 25 | Validated |
-| **DDRL** | Aesthetic + data anchor | mean reward | 3.77 → 3.89 over 29 epochs (steady climb, data anchor stable, no collapse) | Validated |
+| **DDRL** | Aesthetic + data anchor | mean reward | oscillates ~3.7-3.8, no net climb at this budget; data anchor keeps it stable (no collapse) | Stable; reward sample-limited |
 | **DDPO/DPOK** | Aesthetic | mean reward | importance ratio corrected to ~1.0; reward flat at this sample budget (PPO is sample-inefficient) | Mechanism verified |
 
 ## FLUX.1-schnell (separate model)
