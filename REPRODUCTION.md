@@ -13,6 +13,10 @@ All results on **Stable Diffusion 3.5-Medium**, single **NVIDIA A5000 (24GB)**, 
 | **DDRL** | Aesthetic + data anchor | mean reward | 3.77 → 3.89 over 29 epochs (steady climb, data anchor stable, no collapse) | Validated |
 | **DDPO/DPOK** | Aesthetic | mean reward | importance ratio corrected to ~1.0; reward flat at this sample budget (PPO is sample-inefficient) | Mechanism verified |
 
+## FLUX.1-schnell (separate model)
+
+The FLUX code path (model auto-detection, packed 3D latents, `flux_sample_with_logprob` / `flux_replay_step`, schnell guidance gating, image decode) was run end-to-end with FlowGRPO + aesthetic on a 48GB A6000-Ada. Correctness checks at runtime: image range [0.00, 1.00], log-probs finite, packed latents `(B, T, 1024, 64)`. Eval aesthetic reward improved 6.05 → **6.39 best** (epoch 15) but oscillated (6.03–6.39) rather than climbing cleanly. Two reasons it underperforms the SD3 runs: schnell is a 4-step **distilled** model not trained for stochastic SDE sampling, and its sampling/replay importance ratio sits at ~0.92 (vs ~1.0 on SD3), leaving a residual gradient bias. **Status: code path validated on FLUX; convergence modest and noisy on schnell** - a non-distilled model (FLUX.1-dev) would likely be a better RL target.
+
 ## How accuracy was verified
 
 Each trainer was exercised on real hardware with the metric tracked across epochs. For trainers where the raw loss is noisy (SFT), a fixed-timestep before/after eval was used to isolate signal. Gradient flow was checked directly (asserting LoRA `.grad` is non-None with nonzero norm after `backward()`), which is how the DRaFT bug below was caught - unit tests and smoke runs pass without ever verifying that gradients reach the weights.
@@ -31,5 +35,6 @@ Plus smaller fixes: DRaFT grad-accumulation normalizer, GRPO-guard stop-grad, KL
 
 ## Not yet covered
 
-- **FLUX.1**: code path implemented and audited (precision, schnell guidance, packing) but not runtime-validated - FLUX.1-dev and schnell are both gated on Hugging Face and need license approval.
 - **DDPO reward convergence**: the mechanism is correct (unbiased ratio, gradients flow, shares FlowGRPO's validated replay) but PPO is sample-inefficient; demonstrating a reward gain needs a larger sample budget than a single 24GB GPU allows.
+- **FLUX.1-dev**: only schnell was run (see FLUX section). dev is non-distilled and likely a better RL target, but its license gate requires more fields; worth a follow-up run.
+- **FLUX `img_ids`**: passed as a 3D batched tensor, which works but triggers a diffusers deprecation warning each step; should be switched to 2D.
