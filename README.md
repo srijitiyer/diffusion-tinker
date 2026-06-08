@@ -42,7 +42,7 @@ trainer = FlowGRPOTrainer(
     config=FlowGRPOConfig(num_samples_per_prompt=2, num_epochs=40),
 )
 trainer.train()
-# Achieves 0.950 eval OCR accuracy on SD3.5-Medium (paper: 0.823)
+# Achieves 1.00 eval OCR accuracy on SD3.5-Medium by epoch 10 (paper: 0.823)
 ```
 
 ## Supported Algorithms
@@ -195,7 +195,7 @@ DDRLConfig(
 See `examples/`:
 
 - `grpo_aesthetic.py` - FlowGRPO + aesthetic reward (simplest, good first test)
-- `grpo_ocr.py` - FlowGRPO + OCR reward (validated, 0.950 eval accuracy)
+- `grpo_ocr.py` - FlowGRPO + OCR reward (validated, 1.00 eval accuracy by epoch 10)
 - `flowgrpo_multi_reward.py` - FlowGRPO + aesthetic + CLIP multi-reward
 - `custom_reward.py` - Custom reward function with `reward_kwargs` and training callbacks
 - `ddrl_aesthetic.py` - DDRL with data-regularized training (requires dataset)
