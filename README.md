@@ -2,6 +2,8 @@
 
 RL-based post-training for diffusion models. TRL-style API, built on HuggingFace diffusers.
 
+Fine-tuning a diffusion model with RL usually means stitching together research code from several papers, each with its own training loop and assumptions. diffusion-tinker does that part for you. You pick an algorithm and a reward, pass your prompts, and call `.train()` - no SDE log-prob derivations, no LoRA-on-a-frozen-transformer wiring, no per-paper plumbing. Six algorithms (FlowGRPO, DDRL, DRaFT, DiffusionDPO, DDPO, SFT) and Stable Diffusion 3.5 / FLUX.1 sit behind one `Trainer`/`Config` interface.
+
 ## Quickstart
 
 ```bash
