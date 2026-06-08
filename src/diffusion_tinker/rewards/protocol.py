@@ -12,15 +12,11 @@ if TYPE_CHECKING:
 
 @dataclass
 class RewardContext:
-    """All information available to a reward function.
+    """Everything a reward function gets to see.
 
-    Basic fields (always populated):
-        images, prompts, device
-
-    Extended fields (populated when available):
-        latents: final denoised latent tensors from the sampling trajectory
-        epoch: current training epoch
-        metadata: arbitrary user data (populated from reward_kwargs)
+    images, prompts, and device are always set. The rest are filled in when
+    available: latents (final denoised latents from the trajectory), epoch
+    (current training epoch), and metadata (arbitrary user data from reward_kwargs).
     """
 
     images: list[Image.Image]

@@ -5,15 +5,7 @@ from diffusers import AutoencoderKL
 
 
 def encode_to_latents(vae: AutoencoderKL, images: torch.Tensor) -> torch.Tensor:
-    """Encode pixel images to latent space with proper normalization.
-
-    Args:
-        vae: the VAE model
-        images: (B, 3, H, W) in [0, 1] range
-
-    Returns:
-        latents: (B, C, H//8, W//8) normalized for training
-    """
+    """Encode pixel images (B, 3, H, W) in [0, 1] to normalized latents."""
     # The SD3 VAE expects pixels in [-1, 1]; callers pass [0, 1] (e.g. ToTensor
     # output), so map the range before encoding. Without this, SFT/DDRL/DPO
     # encode mis-scaled latents and train toward the wrong denoising target.
@@ -27,15 +19,7 @@ def encode_to_latents(vae: AutoencoderKL, images: torch.Tensor) -> torch.Tensor:
 
 
 def decode_from_latents(vae: AutoencoderKL, latents: torch.Tensor) -> torch.Tensor:
-    """Decode latents to pixel images.
-
-    Args:
-        vae: the VAE model
-        latents: (B, C, H//8, W//8) in normalized space
-
-    Returns:
-        images: (B, 3, H, W) in [0, 1] range
-    """
+    """Decode normalized latents back to pixel images in [0, 1]."""
     latents = latents / vae.config.scaling_factor + vae.config.shift_factor
 
     with torch.no_grad():

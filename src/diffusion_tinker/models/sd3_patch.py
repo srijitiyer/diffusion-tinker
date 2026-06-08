@@ -65,12 +65,11 @@ def sd3_sample_with_logprob(
     dtype = pipeline.transformer.dtype
     batch_size = len(prompts)
     do_cfg = guidance_scale > 1.0
-    # Match the autocast used during replay (see *_trainer._training_step). The
-    # trainable LoRA params are float32; without autocast the sampling forward
-    # runs them in fp32 while replay casts to bf16, so the same policy produces
-    # different noise_pred -> a biased importance ratio (~0.97 instead of 1.0)
-    # that corrupts the PPO gradient. Aligning the precision makes the ratio
-    # unbiased at the first PPO step.
+    # Match the autocast used during replay (see *_trainer._training_step).
+    # LoRA params are float32, so without autocast the sampling forward runs in
+    # fp32 while replay casts to bf16. Same policy, different noise_pred, which
+    # biases the importance ratio (~0.97 instead of 1.0) and corrupts the PPO
+    # gradient. Aligning precision keeps the ratio unbiased at the first step.
     autocast_dtype = torch.bfloat16 if dtype == torch.bfloat16 else torch.float16
 
     (

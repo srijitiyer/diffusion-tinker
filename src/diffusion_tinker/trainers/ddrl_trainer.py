@@ -45,7 +45,6 @@ class DDRLTrainer(BaseDiffusionTrainer):
         print(f"Loading data for DDRL forward KL: {self.config.train_dataset}...")
         from datasets import load_dataset
 
-        # Load dataset
         if os.path.isdir(self.config.train_dataset):
             ds = load_dataset("imagefolder", data_dir=self.config.train_dataset, split=self.config.dataset_split)
         else:

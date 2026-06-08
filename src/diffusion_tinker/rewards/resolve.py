@@ -47,20 +47,11 @@ def resolve_reward(
     reward_weights: list[float] | None = None,
     reward_mode: str = "weighted_sum",
 ) -> BaseReward:
-    """Resolve a reward specification into a callable BaseReward.
+    """Turn a reward spec into a ready-to-call BaseReward.
 
-    Args:
-        reward_func: one of:
-            - str: look up in REWARD_REGISTRY (e.g., "aesthetic")
-            - Callable: wrap as BaseReward
-            - BaseReward: return directly
-            - list: multiple rewards, combined via ComposedReward
-        device: device for the reward model
-        reward_weights: weights for multi-reward (only used when reward_func is a list)
-        reward_mode: aggregation mode for multi-reward ("weighted_sum" or "advantage_level")
-
-    Returns:
-        A BaseReward instance ready to call.
+    reward_func can be a registry name string (e.g. "aesthetic"), a plain
+    callable, a BaseReward, or a list of those (combined via ComposedReward).
+    reward_weights and reward_mode only apply to the list case.
     """
     if isinstance(reward_func, list):
         from diffusion_tinker.rewards.compose import ComposedReward

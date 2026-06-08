@@ -21,12 +21,8 @@ class PerPromptStatTracker:
     def update(self, prompts: list[str], rewards: torch.Tensor) -> torch.Tensor:
         """Compute per-prompt normalized advantages.
 
-        Args:
-            prompts: list of B prompt strings (may contain duplicates for GRPO groups)
-            rewards: tensor of shape (B,)
-
-        Returns:
-            advantages: tensor of shape (B,), per-prompt normalized
+        prompts may contain duplicates (GRPO groups); rewards and the returned
+        advantages are both shape (B,).
         """
         advantages = torch.zeros_like(rewards)
         unique_prompts = list(dict.fromkeys(prompts))  # preserve order, deduplicate

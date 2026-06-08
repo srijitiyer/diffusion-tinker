@@ -41,11 +41,11 @@ class ComposedReward(BaseReward):
             metadata[f"reward_{reward_fn.name}"] = output.scores.mean().item()
 
         if self.mode == "advantage_level":
-            # Normalize each reward to zero-mean/unit-variance across the batch.
-            # Use population std (correction=0) so a single element gives 0, not
-            # NaN. NOTE: do not pair this mode with an RL trainer that also
-            # normalizes rewards into advantages (FlowGRPO/DDPO/DDRL) - that
-            # double-normalizes. Intended for DRaFT / reward inspection.
+            # Normalize each reward to zero mean / unit variance across the
+            # batch. Population std (correction=0) keeps a single element at 0
+            # instead of NaN. Don't pair this mode with an RL trainer that also
+            # normalizes rewards into advantages (FlowGRPO/DDPO/DDRL), or you
+            # double-normalize. Meant for DRaFT and reward inspection.
             combined = torch.zeros_like(all_scores[0])
             for scores, w in zip(all_scores, self.weights):
                 mean = scores.mean()

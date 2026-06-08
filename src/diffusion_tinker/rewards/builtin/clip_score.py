@@ -43,7 +43,8 @@ class CLIPScoreReward(BaseReward):
         input_ids = inputs["input_ids"].to(self.device)
         attention_mask = inputs["attention_mask"].to(self.device)
 
-        # Get image features via vision model + projection (avoids API differences across transformers versions)
+        # Go through vision_model + projection directly so we don't depend on
+        # the higher-level API that shifts between transformers versions.
         vision_out = self._clip.vision_model(pixel_values=pixel_values)
         image_features = self._clip.visual_projection(vision_out.pooler_output)
 

@@ -11,10 +11,10 @@ from diffusion_tinker.rewards.resolve import register_reward
 
 
 class _AestheticMLP(nn.Module):
-    """The aesthetic predictor MLP: 768 -> 1024 -> 128 -> 64 -> 16 -> 1.
+    """Aesthetic predictor MLP: 768 -> 1024 -> 128 -> 64 -> 16 -> 1.
 
-    5 linear layers with dropout after layers 1-3. NO activation functions -
-    the original model uses a pure linear stack with dropout regularization.
+    Five linear layers with dropout after the first three, no activations -
+    the original model is a pure linear stack with dropout regularization.
     """
 
     def __init__(self):
