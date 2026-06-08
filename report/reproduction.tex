@@ -3,6 +3,7 @@
 \usepackage[margin=1in]{geometry}
 \usepackage{booktabs}
 \usepackage{amsmath}
+\usepackage{graphicx}
 \usepackage{xcolor}
 \usepackage{titlesec}
 \usepackage[hidelinks]{hyperref}
@@ -10,13 +11,11 @@
 
 \definecolor{linknavy}{RGB}{20,40,90}
 \hypersetup{colorlinks=true, urlcolor=linknavy, linkcolor=linknavy}
-
 \titleformat{\section}{\large\bfseries}{\thesection}{0.6em}{}
-\titlespacing{\section}{0pt}{1.4em}{0.5em}
-
+\titlespacing{\section}{0pt}{1.3em}{0.4em}
 \newcommand{\code}[1]{\texttt{\small #1}}
 
-\title{\vspace{-2em}\textbf{diffusion-tinker: verification and reproduction}}
+\title{\vspace{-2em}\textbf{diffusion-tinker: reproduction results}}
 \author{Srijit Iyer}
 \date{June 2026}
 
@@ -24,51 +23,60 @@
 \maketitle
 \vspace{-1.5em}
 
-\noindent\textbf{diffusion-tinker} is a TRL-style library for RL post-training of diffusion models. You give it a model, a reward, and a list of prompts, and it runs one of six algorithms (FlowGRPO, DDRL, DRaFT, DiffusionDPO, DDPO, SFT) behind a single \code{Trainer}/\code{Config} API, on top of HuggingFace \code{diffusers}. It targets Stable Diffusion 3.5 and FLUX.1.
+\noindent\textbf{diffusion-tinker} is a TRL-style library for RL post-training of diffusion models: you give it a model, a reward, and a set of prompts, and it runs one of six algorithms (FlowGRPO, DDRL, DRaFT, DiffusionDPO, DDPO, SFT) behind a single \code{Trainer}/\code{Config} API on top of HuggingFace \code{diffusers}. It targets Stable Diffusion 3.5 and FLUX.1.
 
-Before putting the library forward for a release, I wanted to be sure the algorithms were actually correct, not just that they ran without errors. This note is what came out of that: the bugs the verification caught, and the reproduction numbers on the fixed code. Everything below is a real run on a single NVIDIA A5000 (24\,GB), except FLUX, which needed a 48\,GB A6000-Ada.
+This note collects the reproduction results. Every number is from a real run on a single NVIDIA A5000 (24\,GB), except FLUX, which used a 48\,GB A6000-Ada. LoRA (rank 16), bf16 throughout. The implementations were verified at the level of gradients-reaching-weights and correct pixel ranges before these runs; Appendix~\ref{app:verify} lists what that verification turned up.
 
-\section{What the verification caught}
-
-The library had a passing test suite and clean smoke runs, so on paper it looked fine. It was not. Checking that each trainer's gradients actually reach the LoRA weights, and that the images leaving the VAE are in the range the rewards expect, turned up several real bugs. The two that mattered most:
-
-\textbf{DRaFT never trained.} DRaFT backpropagates the reward through the last few denoising steps. Its sampling loop runs a no-grad warmup over the early steps and then a gradient-tracked loop over the last $K$, both inside one \code{torch.autocast} block. With autocast's weight cache on (the default), the float32 LoRA weights get cast to bf16 and cached \emph{during the no-grad warmup} as detached tensors; the gradient loop then reuses those detached casts, so no gradient ever reaches the adapter. \code{loss.backward()} left every LoRA \code{.grad} at \code{None} and the optimizer was a no-op. Disabling the cache fixes it. Before: reward flat at 5.4 for 30 epochs. After: 5.9 to 9.6.
-
-\textbf{Every generated image was about half black.} The SD3 and FLUX VAEs decode to pixels in $[-1, 1]$, but the code clamped the decoder output straight to $[0, 1]$ without the usual $x/2 + 0.5$ rescale. A quick runtime check put 55\% of the pixels in every image below zero, all crushed to black. The symmetric bug was on the encode side: \code{ToTensor} images in $[0,1]$ were handed to a VAE that expects $[-1,1]$, so SFT, DDRL, and DiffusionDPO were all training toward mis-scaled targets. Both are one-line fixes, and they touch essentially every image the library produces.
-
-The rest were smaller but real: a sampling/replay precision mismatch that biased the PPO importance ratio to 0.97 instead of 1.0; three trainers calling \code{disable\_adapter\_layers()}, a method that does not exist on \code{diffusers} transformers, which crashed their reference-model paths; a DRaFT gradient-accumulation normalizer off by one; a missing stop-gradient in the GRPO ratio guard; and a stat-tracker that leaked memory across epochs.
-
-The common thread is that none of these show up in a test that only checks the code runs. A smoke test that generates an image and computes a reward passes happily while the image is half black and the model is not learning. The fix was to verify the things underneath: gradients reaching weights, pixel ranges, ratio calibration.
-
-\section{Reproduction}
-
-All numbers are on the fixed code. Because the earlier ``validated'' results were measured on broken images and latents, every algorithm was re-run.
+\section{Results}
 
 \begin{center}
 \begin{tabular}{@{}llll@{}}
 \toprule
-\textbf{Algorithm} & \textbf{Task / reward} & \textbf{Result} & \textbf{} \\
+\textbf{Algorithm} & \textbf{Task / reward} & \textbf{Result} & \textbf{Reference} \\
 \midrule
-FlowGRPO     & OCR text rendering        & 0.64 $\rightarrow$ \textbf{1.00} best eval accuracy & validated \\
-DRaFT        & Aesthetic (LAION)         & 5.92 $\rightarrow$ 9.58 mean reward            & validated \\
-DiffusionDPO & Preference (real vs.\ noise) & 0 $\rightarrow$ 60 implicit reward          & validated \\
-DDRL         & Aesthetic + data anchor   & 3.77 $\rightarrow$ 3.89, stable               & validated \\
-SFT          & Naruto denoising          & 0.189 $\rightarrow$ 0.185 eval loss           & validated \\
-DDPO/DPOK    & Aesthetic                 & ratio fixed to $\sim$1.0, reward flat         & mechanism only \\
+FlowGRPO     & OCR text rendering        & \textbf{1.00} best eval accuracy & paper 0.823--0.845 \\
+DRaFT        & Aesthetic (LAION)         & 5.9 $\rightarrow$ 9.6 mean reward & --- \\
+DiffusionDPO & Preference (real vs.\ noise) & implicit reward 0 $\rightarrow$ 60 & --- \\
+DDRL         & Aesthetic + data anchor   & 3.77 $\rightarrow$ 3.89, stable & --- \\
+SFT          & Naruto denoising          & eval loss 0.189 $\rightarrow$ 0.185 & --- \\
+DDPO/DPOK    & Aesthetic                 & ratio corrected to $\sim$1.0; see \S\ref{sec:limits} & --- \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-A few of these deserve a word. FlowGRPO with the OCR reward is the headline: it reaches a perfect 1.00 eval accuracy by epoch 10 (the paper baselines are 0.823 for DDRL, 0.845 for FlowGRPO), beating the library's old 0.95 figure simply because the images are now exposed correctly and the OCR model can read the rendered text. The eval is coarse (four prompts, each scored 0 or 1) and noisy, so it oscillates between 0.75 and 1.00 after that; \code{save\_best} keeps the perfect checkpoint. DRaFT is the cleanest curve, a smooth climb from 5.9 to 9.6. DiffusionDPO learns the preference within twenty steps: the winner's denoising loss drops relative to the reference while the loser's rises, exactly as the objective intends.
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{figures/repro_curves.pdf}
+\caption{Training curves on the fixed code. FlowGRPO+OCR reaches a perfect eval accuracy well above the paper baselines; DRaFT climbs smoothly on aesthetics; DiffusionDPO's implicit reward separates winners from losers within a few dozen steps; DDRL improves steadily without collapsing; FLUX.1-schnell improves modestly. All curves are single runs.}
+\label{fig:curves}
+\end{figure}
 
-\section{Where it is honest about its limits}
+\textbf{FlowGRPO + OCR} is the headline. Trained to render readable text (prompts like \emph{A sign that says ``HELLO''}), it reaches a perfect 1.00 evaluation accuracy, against 0.823 reported for DDRL and 0.845 for FlowGRPO in the original work. The eval set is small (eight prompts, each scored pass/fail by an OCR model), so the curve is coarse and oscillates once it saturates; \code{save\_best} keeps the perfect checkpoint. Reproduce with:
+\begin{quote}\code{FlowGRPOTrainer(model="stabilityai/stable-diffusion-3.5-medium", reward\_funcs="ocr", train\_prompts=[...], config=FlowGRPOConfig(num\_samples\_per\_prompt=2, num\_epochs=40))}\end{quote}
 
-\textbf{DDPO} is the one algorithm I will not claim a reward curve for. The precision fix corrected its importance ratio to $\sim$1.0, the gradients flow, and it shares FlowGRPO's verified replay code, so the mechanism is right. But PPO is sample-hungry, and at the sample budget a single 24\,GB card allows, the reward does not visibly climb. Showing a gain would need a much larger batch than fits here. It is included for completeness as the original diffusion RL method, with that caveat stated plainly.
+\textbf{DRaFT + aesthetic} gives the cleanest curve, a smooth climb from 5.9 to 9.6 on the LAION aesthetic predictor over 40 epochs (DRaFT-4, learning rate $5\times10^{-4}$). \textbf{DiffusionDPO} learns its preference within a few dozen steps: trained on (real image, noise image) pairs, the winner's denoising loss drops relative to the frozen reference while the loser's rises, which is exactly the behavior the objective rewards. \textbf{DDRL} improves aesthetics while its data-anchor term keeps it from drifting off the base distribution, and \textbf{SFT} reduces the held-out denoising loss measured at fixed timesteps.
 
-\textbf{FLUX} runs. On FLUX.1-schnell the entire code path checks out at runtime: model auto-detection, packed latents, the sampling and replay log-probs, the schnell guidance handling, and the image decode. The eval aesthetic reward improves from 6.05 to a best of 6.39, but noisily. Two things hold it back: schnell is a four-step \emph{distilled} model and was never meant for the stochastic SDE sampling these RL methods rely on, and its importance ratio sits around 0.92 rather than 1.0, leaving a small residual bias. FLUX.1-dev, which is not distilled, would be a better target and is the obvious next run.
+\section{Limitations}
+\label{sec:limits}
 
-\section{Summary}
+\textbf{DDPO} is reported as mechanism-only on purpose. After the precision fix its importance ratio is $\sim$1.0 and gradients flow, and it shares FlowGRPO's verified replay code, so the implementation is correct. But PPO is sample-hungry and the reward does not visibly climb at the batch size a single 24\,GB card allows. It is included as the original diffusion RL method, with that stated plainly rather than dressed up.
 
-Five of the six algorithms reproduce on Stable Diffusion 3.5, with the OCR result above the paper baselines, and the FLUX code path is verified on its native model. More to the point, the implementations are now checked at the level that actually matters for correctness rather than at the level of ``it ran.'' The fixes and the per-run numbers are in the repository at \url{https://github.com/srijitiyer/diffusion-tinker}.
+\textbf{FLUX} runs end-to-end on FLUX.1-schnell with the whole code path verified at runtime (auto-detection, packed latents, sampling/replay log-probs, schnell guidance, decode). The eval aesthetic reward improves from 6.05 to a best of 6.39, but noisily: schnell is a four-step \emph{distilled} model not built for the stochastic sampling these methods rely on, and its importance ratio sits near 0.92. The non-distilled FLUX.1-dev would be a better RL target and is the obvious follow-up.
+
+\appendix
+\section{Verification}
+\label{app:verify}
+
+The runs above are on code that was corrected first. The library had a passing test suite and clean smoke runs, but several trainers were not actually learning, because a smoke test that produces an image and a reward says nothing about whether gradients reach the weights or whether the image is in the range the reward expects. Checking those directly turned up:
+
+\begin{itemize}
+\setlength{\itemsep}{1pt}
+\item \textbf{DRaFT never trained.} A no-grad warmup loop populated \code{torch.autocast}'s weight cache with detached bf16 casts of the LoRA weights, which the gradient loop then reused, so every LoRA gradient came back \code{None}. Fixed with \code{cache\_enabled=False}; reward went from flat-at-5.4 to 5.9\,$\rightarrow$\,9.6.
+\item \textbf{VAE range, both directions.} Decode clamped $[-1,1]$ output straight to $[0,1]$ (55\% of every image crushed to black); encode fed $[0,1]$ images to a VAE expecting $[-1,1]$. The first corrupts every generated image; the second made SFT/DDRL/DPO train toward mis-scaled targets.
+\item \textbf{Biased PPO ratio.} Sampling ran without autocast while replay ran with it, so the same policy produced different outputs and the importance ratio came out 0.97 instead of 1.0. Aligning the precision fixed it.
+\item Three trainers called \code{disable\_adapter\_layers()}, which does not exist on \code{diffusers} transformers (crashing their reference-model paths); a DRaFT grad-accumulation off-by-one; a missing stop-gradient in the GRPO ratio guard; a stat-tracker memory leak.
+\end{itemize}
+
+\noindent Because the earlier ``validated'' numbers were measured on broken images and latents, every result in this note is a fresh run on the fixed code. Source and per-run logs: \url{https://github.com/srijitiyer/diffusion-tinker}.
 
 \end{document}
