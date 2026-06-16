@@ -1,6 +1,7 @@
 from diffusion_tinker.rewards.builtin import (
     aesthetic,  # noqa: F401
     clip_score,  # noqa: F401
+    pickscore,  # noqa: F401
 )
 
 # Optional rewards with heavy dependencies

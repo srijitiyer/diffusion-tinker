@@ -48,7 +48,10 @@ class DDPOTrainer(BaseDiffusionTrainer):
                 next_latent_t = trajectory.next_latents[:, j]
 
                 step_noise_level = config.noise_level if j < num_steps - 1 else 0.0
-                with torch.autocast(device_type=device.type, dtype=autocast_dtype):
+                # cache_enabled=False to match the sampling forward (see FlowGRPO)
+                # - otherwise the replay noise_pred drifts from sampling and the
+                # SDE log-prob biases the importance ratio below 1.0.
+                with torch.autocast(device_type=device.type, dtype=autocast_dtype, cache_enabled=False):
                     log_prob_new, prev_sample_mean = self._replay_step(
                         transformer=self.transformer,
                         latent_t=latent_t,

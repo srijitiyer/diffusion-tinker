@@ -51,7 +51,7 @@ class BaseDiffusionTrainer(ABC):
             reward_funcs, device=str(self.device), reward_weights=reward_weights, reward_mode=reward_mode
         )
 
-        self.stat_tracker = PerPromptStatTracker()
+        self.stat_tracker = PerPromptStatTracker(global_std=config.advantage_global_std)
 
         trainable_params = [p for p in self.transformer.parameters() if p.requires_grad]
         self.optimizer = torch.optim.AdamW(

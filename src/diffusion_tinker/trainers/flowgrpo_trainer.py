@@ -50,7 +50,11 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
                 continue
 
             step_noise_level = config.noise_level if j < num_steps - 1 else 0.0
-            with torch.autocast(device_type=device.type, dtype=autocast_dtype):
+            # cache_enabled=False to match the sampling forward exactly. With
+            # the default cache on, the replay forward's noise_pred differs
+            # slightly from sampling's, and the SDE log-prob amplifies that into
+            # an importance ratio biased below 1.0 (badly at low sigma).
+            with torch.autocast(device_type=device.type, dtype=autocast_dtype, cache_enabled=False):
                 log_prob_new, prev_sample_mean = self._replay_step(
                     transformer=self.transformer,
                     latent_t=latent_t,
@@ -87,7 +91,7 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
                 with torch.no_grad():
                     self.transformer.disable_adapters()
                     try:
-                        with torch.autocast(device_type=device.type, dtype=autocast_dtype):
+                        with torch.autocast(device_type=device.type, dtype=autocast_dtype, cache_enabled=False):
                             _, prev_sample_mean_ref = self._replay_step(
                                 transformer=self.transformer,
                                 latent_t=latent_t,

@@ -139,7 +139,9 @@ class DDRLTrainer(BaseDiffusionTrainer):
 
             if has_signal:
                 step_noise_level = config.noise_level if j < num_steps - 1 else 0.0
-                with torch.autocast(device_type=device.type, dtype=autocast_dtype):
+                # cache_enabled=False to match the sampling forward (see FlowGRPO)
+                # so the importance ratio isn't biased by autocast cast drift.
+                with torch.autocast(device_type=device.type, dtype=autocast_dtype, cache_enabled=False):
                     log_prob_new, prev_sample_mean = self._replay_step(
                         transformer=self.transformer,
                         latent_t=latent_t,

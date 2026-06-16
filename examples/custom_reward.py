@@ -4,7 +4,7 @@ from diffusion_tinker import FlowGRPOTrainer, FlowGRPOConfig, TrainerCallback, R
 
 
 def style_reward(ctx: RewardContext):
-    """Example: reward images based on custom user-defined criteria.
+    """Score images against custom user-defined criteria.
 
     ctx.metadata contains everything passed via reward_kwargs.
     ctx.latents gives access to the final denoised latent tensors.
@@ -22,7 +22,7 @@ def style_reward(ctx: RewardContext):
 
 
 class LoggingCallback(TrainerCallback):
-    """Example callback that logs training progress."""
+    """Logs training progress at each hook."""
 
     def on_train_begin(self, trainer):
         print(f"Training started with {len(trainer.train_prompts)} prompts")

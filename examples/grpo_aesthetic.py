@@ -1,7 +1,7 @@
 """FlowGRPO + SD3.5-Medium + Aesthetic Reward
 
-The simplest example: improve image aesthetics with no dataset required.
-FlowGRPO with aesthetic reward is a good first test to verify your setup.
+Improve image aesthetics with no dataset required. Good first run to check
+that your setup works.
 
 Requirements:
     pip install diffusion-tinker

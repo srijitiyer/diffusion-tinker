@@ -170,10 +170,15 @@ def flux_sample_with_logprob(
             noise_level=step_noise_level,
             generator=generator,
         )
-        latents = latents.to(dtype)
 
+        # Store the float32 sampled latent as the replay target (see sd3_patch):
+        # rounding to bf16 before storing shifts the target and, with the SDE
+        # std near 0 at low sigma, biases the importance ratio. Round only for
+        # the next transformer input.
         all_next_latents.append(latents.detach().cpu())
         all_log_probs.append(log_prob.detach().cpu())
+
+        latents = latents.to(dtype)
 
     latents_spatial = _unpack_latents(latents, height, width, channels=latent_channels)
     latents_spatial = latents_spatial / pipeline.vae.config.scaling_factor + pipeline.vae.config.shift_factor

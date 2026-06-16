@@ -1,46 +1,39 @@
 from __future__ import annotations
 
-from collections import defaultdict
-
 import torch
 
 
 class PerPromptStatTracker:
-    """Tracks per-prompt reward statistics for advantage normalization.
+    """Computes per-prompt (GRPO group-relative) advantages.
 
-    Groups rewards by prompt and normalizes within each group:
-        advantage = (reward - group_mean) / (group_std + eps)
-
-    Based on FlowGRPO's implementation. Uses eps=1e-4 (not 1e-8).
+    advantage = (reward - group_mean) / (std + eps), where the mean is always
+    per-prompt. The std is either per-prompt (default) or the global std across
+    the whole batch (global_std=True). Global std matters for low-variance
+    rewards like aesthetic: dividing by a tiny per-prompt std there just
+    amplifies sampling noise into large advantages, so the policy chases noise.
+    eps=1e-4 matches FlowGRPO.
     """
 
-    def __init__(self, eps: float = 1e-4):
+    def __init__(self, eps: float = 1e-4, global_std: bool = False):
         self.eps = eps
-        self.stats: dict[str, list[float]] = defaultdict(list)
+        self.global_std = global_std
 
     def update(self, prompts: list[str], rewards: torch.Tensor) -> torch.Tensor:
-        """Compute per-prompt normalized advantages.
-
-        prompts may contain duplicates (GRPO groups); rewards and the returned
-        advantages are both shape (B,).
-        """
         advantages = torch.zeros_like(rewards)
-        unique_prompts = list(dict.fromkeys(prompts))  # preserve order, deduplicate
+        unique_prompts = list(dict.fromkeys(prompts))
+
+        batch_std = rewards.std() if rewards.numel() > 1 else torch.tensor(0.0, device=rewards.device)
 
         for prompt in unique_prompts:
             indices = [i for i, p in enumerate(prompts) if p == prompt]
             group_rewards = rewards[indices]
-
             mean = group_rewards.mean()
-            # std() on a single element returns NaN with Bessel correction
-            # Use std(correction=0) for groups of 1, matching FlowGRPO behavior
-            if len(group_rewards) > 1:
-                std = group_rewards.std()
+            if self.global_std:
+                std = batch_std
+            elif len(group_rewards) > 1:
+                std = group_rewards.std()  # std() on one element is NaN; guarded above
             else:
                 std = torch.tensor(0.0, device=rewards.device)
             advantages[indices] = (group_rewards - mean) / (std + self.eps)
 
         return advantages
-
-    def clear(self):
-        self.stats.clear()

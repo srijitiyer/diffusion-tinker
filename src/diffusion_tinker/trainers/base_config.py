@@ -33,6 +33,10 @@ class BaseDiffusionConfig:
     # RL
     clip_range: float = 0.2
     adv_clip_max: float = 5.0
+    # Normalize advantages by the global batch std instead of per-prompt std.
+    # Helps low-variance rewards (e.g. aesthetic) where a tiny per-prompt std
+    # otherwise amplifies sampling noise. Matches FlowGRPO's global_std option.
+    advantage_global_std: bool = False
 
     # Model
     model_type: str = "auto"  # "auto", "sd3", or "flux"

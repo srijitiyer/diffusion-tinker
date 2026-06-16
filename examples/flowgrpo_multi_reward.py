@@ -1,8 +1,7 @@
 """FlowGRPO + SD3.5-Medium + Multi-Reward
 
 Combines aesthetic and CLIP score rewards with weighted aggregation.
-FlowGRPO doesn't require a dataset anchor, so it's the simplest algorithm
-to get started with.
+FlowGRPO needs no dataset anchor, so it's easy to get started with.
 
 Requirements:
     pip install diffusion-tinker

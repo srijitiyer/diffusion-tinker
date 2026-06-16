@@ -144,10 +144,16 @@ def sd3_sample_with_logprob(
             generator=generator,
         )
 
-        latents = latents.to(dtype)
-
+        # Store the float32 sampled latent as the replay target. log_prob was
+        # computed on this exact value, so replay must see it too - rounding to
+        # bf16 here would shift the target, and since the SDE std shrinks toward
+        # 0 at low sigma, that tiny shift blows up the per-step log-prob and
+        # biases the importance ratio away from 1.0. Round only for the next
+        # step's transformer input.
         all_next_latents.append(latents.detach().cpu())
         all_log_probs.append(log_prob.detach().cpu())
+
+        latents = latents.to(dtype)
 
     decoded = _decode_latents(pipeline, latents)
     images = _tensor_to_pil(decoded)
