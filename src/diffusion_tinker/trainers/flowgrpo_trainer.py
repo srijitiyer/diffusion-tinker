@@ -23,8 +23,11 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
         has_signal = trajectory.advantages is not None and trajectory.advantages.std().item() > 1e-6
         num_steps = trajectory.log_probs.shape[1]
 
-        timestep_indices = list(range(num_steps))
-        if config.num_train_timesteps is not None and config.num_train_timesteps < num_steps:
+        # Train on the first timestep_fraction of steps (drop the low-sigma tail
+        # where the log-prob / ratio is ill-conditioned, like FlowGRPO).
+        num_train = max(1, int(num_steps * config.timestep_fraction))
+        timestep_indices = list(range(num_train))
+        if config.num_train_timesteps is not None and config.num_train_timesteps < len(timestep_indices):
             timestep_indices = sorted(random.sample(timestep_indices, config.num_train_timesteps))
         random.shuffle(timestep_indices)
 

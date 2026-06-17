@@ -33,6 +33,11 @@ class BaseDiffusionConfig:
     # RL
     clip_range: float = 0.2
     adv_clip_max: float = 5.0
+    # Train only on the first timestep_fraction of denoising steps (the higher-
+    # sigma ones). The last low-sigma steps have std_dev_t -> 0, where the SDE
+    # log-prob is ill-conditioned and the importance ratio is unreliable;
+    # FlowGRPO drops them with timestep_fraction=0.99. 1.0 = train on all steps.
+    timestep_fraction: float = 1.0
     # Normalize advantages by the global batch std instead of per-prompt std.
     # Helps low-variance rewards (e.g. aesthetic) where a tiny per-prompt std
     # otherwise amplifies sampling noise. Matches FlowGRPO's global_std option.

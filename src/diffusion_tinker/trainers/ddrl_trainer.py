@@ -120,7 +120,8 @@ class DDRLTrainer(BaseDiffusionTrainer):
         total_ratio = 0.0
         num_computed_steps = 0
 
-        timestep_indices = list(range(num_steps))
+        num_train = max(1, int(num_steps * config.timestep_fraction))
+        timestep_indices = list(range(num_train))
         random.shuffle(timestep_indices)
 
         self.optimizer.zero_grad()

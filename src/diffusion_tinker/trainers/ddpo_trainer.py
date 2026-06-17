@@ -33,8 +33,9 @@ class DDPOTrainer(BaseDiffusionTrainer):
 
         self.optimizer.zero_grad()
 
+        num_train = max(1, int(num_steps * config.timestep_fraction))
         for ppo_epoch in range(config.ppo_epochs):
-            timestep_indices = list(range(num_steps))
+            timestep_indices = list(range(num_train))
             random.shuffle(timestep_indices)
 
             for j in timestep_indices:
