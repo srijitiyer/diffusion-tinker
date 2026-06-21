@@ -39,101 +39,114 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
         self.optimizer.zero_grad()
         autocast_dtype = torch.bfloat16 if config.mixed_precision == "bf16" else torch.float16
 
-        for j in timestep_indices:
-            sigma = trajectory.timesteps[j]
-            sigma_next = trajectory.timesteps[j + 1]
+        # Mini-batch the gradient-tracked replay over trajectories. The rollout
+        # may hold many prompts at a large group size; replaying them all at once
+        # OOMs, so we split into chunks of train_batch_size and accumulate grads.
+        # Each chunk's loss is weighted by chunk_size / batch_size, so the summed
+        # gradient is identical to a single full-batch pass - just lower peak mem.
+        batch_size = len(trajectory)
+        mb_size = config.train_batch_size or batch_size
+        minibatches = [slice(s, min(s + mb_size, batch_size)) for s in range(0, batch_size, mb_size)]
 
-            if sigma_next.item() < 1e-6:
-                continue
+        for sl in minibatches:
+            mb = trajectory[sl]
+            mb_weight = len(mb) / batch_size
 
-            latent_t = trajectory.latents[:, j]
-            next_latent_t = trajectory.next_latents[:, j]
+            for j in timestep_indices:
+                sigma = mb.timesteps[j]
+                sigma_next = mb.timesteps[j + 1]
 
-            if not has_signal:
-                continue
+                if sigma_next.item() < 1e-6:
+                    continue
 
-            step_noise_level = config.noise_level if j < num_steps - 1 else 0.0
-            # cache_enabled=False to match the sampling forward exactly. With
-            # the default cache on, the replay forward's noise_pred differs
-            # slightly from sampling's, and the SDE log-prob amplifies that into
-            # an importance ratio biased below 1.0 (badly at low sigma).
-            with torch.autocast(device_type=device.type, dtype=autocast_dtype, cache_enabled=False):
-                log_prob_new, prev_sample_mean = self._replay_step(
-                    transformer=self.transformer,
-                    latent_t=latent_t,
-                    next_latent_t=next_latent_t,
-                    sigma=sigma,
-                    sigma_next=sigma_next,
-                    prompt_embeds=trajectory.prompt_embeds,
-                    pooled_embeds=trajectory.pooled_embeds,
-                    guidance_scale=config.guidance_scale,
-                    noise_level=step_noise_level,
-                    negative_prompt_embeds=trajectory.negative_prompt_embeds,
-                    negative_pooled_embeds=trajectory.negative_pooled_embeds,
-                    img_ids=trajectory.img_ids,
-                    txt_ids=trajectory.txt_ids,
-                )
+                latent_t = mb.latents[:, j]
+                next_latent_t = mb.next_latents[:, j]
 
-            log_prob_old = trajectory.log_probs[:, j]
-            ratio = torch.exp(log_prob_new.float() - log_prob_old.float())
+                if not has_signal:
+                    continue
 
-            if config.use_grpo_guard:
-                # The guard renormalizes the batch-mean ratio to 1; the
-                # normalizer must be a stop-grad scalar, otherwise gradients
-                # leak through ratio.mean() and change the PPO objective.
-                ratio = ratio / (ratio.mean().detach() + 1e-8)
+                step_noise_level = config.noise_level if j < num_steps - 1 else 0.0
+                # cache_enabled=False to match the sampling forward exactly. With
+                # the default cache on, the replay forward's noise_pred differs
+                # slightly from sampling's, and the SDE log-prob amplifies that into
+                # an importance ratio biased below 1.0 (badly at low sigma).
+                with torch.autocast(device_type=device.type, dtype=autocast_dtype, cache_enabled=False):
+                    log_prob_new, prev_sample_mean = self._replay_step(
+                        transformer=self.transformer,
+                        latent_t=latent_t,
+                        next_latent_t=next_latent_t,
+                        sigma=sigma,
+                        sigma_next=sigma_next,
+                        prompt_embeds=mb.prompt_embeds,
+                        pooled_embeds=mb.pooled_embeds,
+                        guidance_scale=config.guidance_scale,
+                        noise_level=step_noise_level,
+                        negative_prompt_embeds=mb.negative_prompt_embeds,
+                        negative_pooled_embeds=mb.negative_pooled_embeds,
+                        img_ids=mb.img_ids,
+                        txt_ids=mb.txt_ids,
+                    )
 
-            advantages = trajectory.advantages
-            unclipped = -advantages * ratio
-            clipped = -advantages * torch.clamp(ratio, 1.0 - config.clip_range, 1.0 + config.clip_range)
-            rl_loss = torch.mean(torch.maximum(unclipped, clipped))
+                log_prob_old = mb.log_probs[:, j]
+                ratio = torch.exp(log_prob_new.float() - log_prob_old.float())
 
-            kl_loss = torch.tensor(0.0, device=device)
-            if config.kl_beta > 0:
-                # reference model = base model with LoRA disabled
-                with torch.no_grad():
-                    self.transformer.disable_adapters()
-                    try:
-                        with torch.autocast(device_type=device.type, dtype=autocast_dtype, cache_enabled=False):
-                            _, prev_sample_mean_ref = self._replay_step(
-                                transformer=self.transformer,
-                                latent_t=latent_t,
-                                next_latent_t=next_latent_t,
-                                sigma=sigma,
-                                sigma_next=sigma_next,
-                                prompt_embeds=trajectory.prompt_embeds,
-                                pooled_embeds=trajectory.pooled_embeds,
-                                guidance_scale=config.guidance_scale,
-                                noise_level=step_noise_level,
-                                negative_prompt_embeds=trajectory.negative_prompt_embeds,
-                                negative_pooled_embeds=trajectory.negative_pooled_embeds,
-                                img_ids=trajectory.img_ids,
-                                txt_ids=trajectory.txt_ids,
-                            )
-                    finally:
-                        self.transformer.enable_adapters()
+                if config.use_grpo_guard:
+                    # The guard renormalizes the batch-mean ratio to 1; the
+                    # normalizer must be a stop-grad scalar, otherwise gradients
+                    # leak through ratio.mean() and change the PPO objective.
+                    ratio = ratio / (ratio.mean().detach() + 1e-8)
 
-                sigma_val = sigma.float().clamp(max=0.9999)
-                dt = (sigma_next - sigma).float()
-                # Use the same noise level the replay step used for the mean
-                # (step_noise_level, which is 0 on the final step) so the KL
-                # variance is consistent with the policy/reference means.
-                std_dev_t = torch.sqrt(sigma_val / (1.0 - sigma_val)) * step_noise_level
-                noise_std = std_dev_t * torch.sqrt((-dt).clamp(min=1e-12))
+                advantages = mb.advantages
+                unclipped = -advantages * ratio
+                clipped = -advantages * torch.clamp(ratio, 1.0 - config.clip_range, 1.0 + config.clip_range)
+                rl_loss = torch.mean(torch.maximum(unclipped, clipped))
 
-                diff = (prev_sample_mean.float() - prev_sample_mean_ref.float()).pow(2)
-                kl_per_sample = diff.mean(dim=tuple(range(1, diff.ndim))) / (2.0 * noise_std.pow(2) + 1e-12)
-                kl_loss = kl_per_sample.mean()
+                kl_loss = torch.tensor(0.0, device=device)
+                if config.kl_beta > 0:
+                    # reference model = base model with LoRA disabled
+                    with torch.no_grad():
+                        self.transformer.disable_adapters()
+                        try:
+                            with torch.autocast(device_type=device.type, dtype=autocast_dtype, cache_enabled=False):
+                                _, prev_sample_mean_ref = self._replay_step(
+                                    transformer=self.transformer,
+                                    latent_t=latent_t,
+                                    next_latent_t=next_latent_t,
+                                    sigma=sigma,
+                                    sigma_next=sigma_next,
+                                    prompt_embeds=mb.prompt_embeds,
+                                    pooled_embeds=mb.pooled_embeds,
+                                    guidance_scale=config.guidance_scale,
+                                    noise_level=step_noise_level,
+                                    negative_prompt_embeds=mb.negative_prompt_embeds,
+                                    negative_pooled_embeds=mb.negative_pooled_embeds,
+                                    img_ids=mb.img_ids,
+                                    txt_ids=mb.txt_ids,
+                                )
+                        finally:
+                            self.transformer.enable_adapters()
 
-            loss = rl_loss + config.kl_beta * kl_loss
-            loss = loss / len(timestep_indices)
-            if loss.requires_grad:
-                loss.backward()
+                    sigma_val = sigma.float().clamp(max=0.9999)
+                    dt = (sigma_next - sigma).float()
+                    # Use the same noise level the replay step used for the mean
+                    # (step_noise_level, which is 0 on the final step) so the KL
+                    # variance is consistent with the policy/reference means.
+                    std_dev_t = torch.sqrt(sigma_val / (1.0 - sigma_val)) * step_noise_level
+                    noise_std = std_dev_t * torch.sqrt((-dt).clamp(min=1e-12))
 
-            total_rl_loss += rl_loss.item()
-            total_kl_loss += kl_loss.item() if isinstance(kl_loss, torch.Tensor) else kl_loss
-            total_ratio += ratio.mean().item()
-            num_computed_steps += 1
+                    diff = (prev_sample_mean.float() - prev_sample_mean_ref.float()).pow(2)
+                    kl_per_sample = diff.mean(dim=tuple(range(1, diff.ndim))) / (2.0 * noise_std.pow(2) + 1e-12)
+                    kl_loss = kl_per_sample.mean()
+
+                loss = rl_loss + config.kl_beta * kl_loss
+                loss = loss * mb_weight / len(timestep_indices)
+                if loss.requires_grad:
+                    loss.backward()
+
+                total_rl_loss += rl_loss.item()
+                total_kl_loss += kl_loss.item() if isinstance(kl_loss, torch.Tensor) else kl_loss
+                total_ratio += ratio.mean().item()
+                num_computed_steps += 1
 
         torch.nn.utils.clip_grad_norm_(
             [p for p in self.transformer.parameters() if p.requires_grad],

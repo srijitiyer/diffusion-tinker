@@ -22,6 +22,16 @@ class BaseDiffusionConfig:
     eval_every: int = 10
     log_every: int = 1
 
+    # Mini-batch size for the gradient-tracked replay/training pass. The rollout
+    # collects a full batch (num_prompts * num_samples_per_prompt trajectories),
+    # but replaying all of them through the transformer at once OOMs once the
+    # group size is large. When set, the training step splits the batch into
+    # chunks of this many trajectories and accumulates gradients across them,
+    # so memory is bounded by train_batch_size instead of the full batch. This
+    # is what lets you use many diverse prompts at a large group size (FlowGRPO's
+    # actual setup) on a single GPU. None = replay the whole batch at once.
+    train_batch_size: int | None = None
+
     # Sampling / rollout
     num_samples_per_prompt: int = 4
     num_inference_steps: int = 28

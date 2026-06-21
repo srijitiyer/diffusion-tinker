@@ -128,82 +128,94 @@ class DDRLTrainer(BaseDiffusionTrainer):
 
         autocast_dtype = torch.bfloat16 if config.mixed_precision == "bf16" else torch.float16
 
-        for j in timestep_indices:
-            sigma = trajectory.timesteps[j]
-            sigma_next = trajectory.timesteps[j + 1]
+        # Mini-batch the gradient-tracked replay over trajectories so a large
+        # group size * many prompts fits in memory; gradients accumulate across
+        # chunks and each chunk is weighted by its share of the batch, so the
+        # result matches a single full-batch pass. (See FlowGRPO trainer.)
+        mb_size = config.train_batch_size or batch_size
+        minibatches = [slice(s, min(s + mb_size, batch_size)) for s in range(0, batch_size, mb_size)]
 
-            if sigma_next.item() < 1e-6:
-                continue
+        for sl in minibatches:
+            mb = trajectory[sl]
+            mb_batch_size = len(mb)
+            mb_weight = mb_batch_size / batch_size
 
-            latent_t = trajectory.latents[:, j]
-            next_latent_t = trajectory.next_latents[:, j]
+            for j in timestep_indices:
+                sigma = mb.timesteps[j]
+                sigma_next = mb.timesteps[j + 1]
 
-            if has_signal:
-                step_noise_level = config.noise_level if j < num_steps - 1 else 0.0
-                # cache_enabled=False to match the sampling forward (see FlowGRPO)
-                # so the importance ratio isn't biased by autocast cast drift.
-                with torch.autocast(device_type=device.type, dtype=autocast_dtype, cache_enabled=False):
-                    log_prob_new, prev_sample_mean = self._replay_step(
-                        transformer=self.transformer,
-                        latent_t=latent_t,
-                        next_latent_t=next_latent_t,
-                        sigma=sigma,
-                        sigma_next=sigma_next,
-                        prompt_embeds=trajectory.prompt_embeds,
-                        pooled_embeds=trajectory.pooled_embeds,
-                        guidance_scale=config.guidance_scale,
-                        noise_level=step_noise_level,
-                        negative_prompt_embeds=trajectory.negative_prompt_embeds,
-                        negative_pooled_embeds=trajectory.negative_pooled_embeds,
-                        img_ids=trajectory.img_ids,
-                        txt_ids=trajectory.txt_ids,
-                    )
+                if sigma_next.item() < 1e-6:
+                    continue
 
-                log_prob_old = trajectory.log_probs[:, j]
-                ratio = torch.exp(log_prob_new.float() - log_prob_old.float())
+                latent_t = mb.latents[:, j]
+                next_latent_t = mb.next_latents[:, j]
 
-                advantages = trajectory.advantages
-                unclipped = -advantages * ratio
-                clipped = -advantages * torch.clamp(ratio, 1.0 - config.clip_range, 1.0 + config.clip_range)
-                rl_loss = torch.mean(torch.maximum(unclipped, clipped))
-            else:
-                rl_loss = torch.tensor(0.0, device=device)
-                ratio = torch.tensor(1.0, device=device)
+                if has_signal:
+                    step_noise_level = config.noise_level if j < num_steps - 1 else 0.0
+                    # cache_enabled=False to match the sampling forward (see FlowGRPO)
+                    # so the importance ratio isn't biased by autocast cast drift.
+                    with torch.autocast(device_type=device.type, dtype=autocast_dtype, cache_enabled=False):
+                        log_prob_new, prev_sample_mean = self._replay_step(
+                            transformer=self.transformer,
+                            latent_t=latent_t,
+                            next_latent_t=next_latent_t,
+                            sigma=sigma,
+                            sigma_next=sigma_next,
+                            prompt_embeds=mb.prompt_embeds,
+                            pooled_embeds=mb.pooled_embeds,
+                            guidance_scale=config.guidance_scale,
+                            noise_level=step_noise_level,
+                            negative_prompt_embeds=mb.negative_prompt_embeds,
+                            negative_pooled_embeds=mb.negative_pooled_embeds,
+                            img_ids=mb.img_ids,
+                            txt_ids=mb.txt_ids,
+                        )
 
-            data_loss = torch.tensor(0.0, device=device)
-            if config.data_beta > 0:
-                u = torch.normal(mean=config.logit_mean, std=config.logit_std, size=(batch_size,), device=device)
-                t = torch.sigmoid(u)
+                    log_prob_old = mb.log_probs[:, j]
+                    ratio = torch.exp(log_prob_new.float() - log_prob_old.float())
 
-                assert self._data_latents is not None, "data_beta > 0 requires train_dataset"
-                data_idx = torch.randint(0, len(self._data_latents), (batch_size,))
-                clean_latents = self._data_latents[data_idx].to(device, dtype=autocast_dtype)
+                    advantages = mb.advantages
+                    unclipped = -advantages * ratio
+                    clipped = -advantages * torch.clamp(ratio, 1.0 - config.clip_range, 1.0 + config.clip_range)
+                    rl_loss = torch.mean(torch.maximum(unclipped, clipped))
+                else:
+                    rl_loss = torch.tensor(0.0, device=device)
+                    ratio = torch.tensor(1.0, device=device)
 
-                noise = torch.randn_like(clean_latents)
-                # full condition dropout: clean latents are from the dataset, not related
-                # to the RL prompts, so conditioning on RL prompts is semantically wrong
-                dropout_mask = torch.ones(batch_size, device=device, dtype=torch.bool)
+                data_loss = torch.tensor(0.0, device=device)
+                if config.data_beta > 0:
+                    u = torch.normal(mean=config.logit_mean, std=config.logit_std, size=(mb_batch_size,), device=device)
+                    t = torch.sigmoid(u)
 
-                with torch.autocast(device_type=device.type, dtype=autocast_dtype):
-                    data_loss = compute_flow_matching_loss(
-                        transformer=self.transformer,
-                        latents=clean_latents,
-                        noise=noise,
-                        sigmas=t,
-                        prompt_embeds=trajectory.prompt_embeds,
-                        pooled_embeds=trajectory.pooled_embeds,
-                        condition_dropout_mask=dropout_mask,
-                    )
+                    assert self._data_latents is not None, "data_beta > 0 requires train_dataset"
+                    data_idx = torch.randint(0, len(self._data_latents), (mb_batch_size,))
+                    clean_latents = self._data_latents[data_idx].to(device, dtype=autocast_dtype)
 
-            loss = rl_loss + config.data_beta * data_loss
-            loss = loss / len(timestep_indices)
-            if loss.requires_grad:
-                loss.backward()
+                    noise = torch.randn_like(clean_latents)
+                    # full condition dropout: clean latents are from the dataset, not related
+                    # to the RL prompts, so conditioning on RL prompts is semantically wrong
+                    dropout_mask = torch.ones(mb_batch_size, device=device, dtype=torch.bool)
 
-            total_rl_loss += rl_loss.item()
-            total_data_loss += data_loss.item() if isinstance(data_loss, torch.Tensor) else data_loss
-            total_ratio += ratio.mean().item()
-            num_computed_steps += 1
+                    with torch.autocast(device_type=device.type, dtype=autocast_dtype):
+                        data_loss = compute_flow_matching_loss(
+                            transformer=self.transformer,
+                            latents=clean_latents,
+                            noise=noise,
+                            sigmas=t,
+                            prompt_embeds=mb.prompt_embeds,
+                            pooled_embeds=mb.pooled_embeds,
+                            condition_dropout_mask=dropout_mask,
+                        )
+
+                loss = rl_loss + config.data_beta * data_loss
+                loss = loss * mb_weight / len(timestep_indices)
+                if loss.requires_grad:
+                    loss.backward()
+
+                total_rl_loss += rl_loss.item()
+                total_data_loss += data_loss.item() if isinstance(data_loss, torch.Tensor) else data_loss
+                total_ratio += ratio.mean().item()
+                num_computed_steps += 1
 
         torch.nn.utils.clip_grad_norm_(
             [p for p in self.transformer.parameters() if p.requires_grad],
