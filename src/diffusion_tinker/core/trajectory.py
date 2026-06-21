@@ -40,6 +40,18 @@ class TrajectoryBatch:
         return self.latents.shape[0]
 
     def __getitem__(self, idx) -> TrajectoryBatch:
+        # Resolve idx to a concrete list of positions so list/tensor indices
+        # (used for shuffled mini-batches) work for prompts/images too, not just
+        # slices.
+        if isinstance(idx, slice):
+            positions = list(range(self.latents.shape[0]))[idx]
+        elif torch.is_tensor(idx):
+            positions = idx.tolist()
+        elif isinstance(idx, (list, tuple)):
+            positions = list(idx)
+        else:
+            positions = [idx]
+
         return TrajectoryBatch(
             latents=self.latents[idx],
             next_latents=self.next_latents[idx],
@@ -47,16 +59,14 @@ class TrajectoryBatch:
             timesteps=self.timesteps,
             prompt_embeds=self.prompt_embeds[idx],
             pooled_embeds=self.pooled_embeds[idx],
-            prompts=[self.prompts[i] for i in (range(len(self.prompts))[idx] if isinstance(idx, slice) else [idx])],
+            prompts=[self.prompts[i] for i in positions],
             negative_prompt_embeds=self.negative_prompt_embeds[idx] if self.negative_prompt_embeds is not None else None,
             negative_pooled_embeds=self.negative_pooled_embeds[idx] if self.negative_pooled_embeds is not None else None,
             img_ids=self.img_ids[idx] if self.img_ids is not None else None,
             txt_ids=self.txt_ids,
             rewards=self.rewards[idx] if self.rewards is not None else None,
             advantages=self.advantages[idx] if self.advantages is not None else None,
-            images=[self.images[i] for i in (range(len(self.images))[idx] if isinstance(idx, slice) else [idx])]
-            if self.images
-            else [],
+            images=[self.images[i] for i in positions] if self.images else [],
         )
 
     def to(self, device: torch.device | str) -> TrajectoryBatch:

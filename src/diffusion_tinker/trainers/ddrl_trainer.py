@@ -124,21 +124,21 @@ class DDRLTrainer(BaseDiffusionTrainer):
         timestep_indices = list(range(num_train))
         random.shuffle(timestep_indices)
 
-        self.optimizer.zero_grad()
-
         autocast_dtype = torch.bfloat16 if config.mixed_precision == "bf16" else torch.float16
 
-        # Mini-batch the gradient-tracked replay over trajectories so a large
-        # group size * many prompts fits in memory; gradients accumulate across
-        # chunks and each chunk is weighted by its share of the batch, so the
-        # result matches a single full-batch pass. (See FlowGRPO trainer.)
+        # Mini-batch the replay over trajectories and step once per mini-batch
+        # (true minibatch SGD), so a large group size * many prompts fits in
+        # memory and the reward gets many updates per epoch instead of one.
+        # (See FlowGRPO trainer.)
         mb_size = config.train_batch_size or batch_size
-        minibatches = [slice(s, min(s + mb_size, batch_size)) for s in range(0, batch_size, mb_size)]
+        # Shuffle so each mini-batch mixes prompts (see FlowGRPO trainer).
+        perm = torch.randperm(batch_size, device=device)
+        minibatches = [perm[s:s + mb_size] for s in range(0, batch_size, mb_size)]
 
         for sl in minibatches:
+            self.optimizer.zero_grad()
             mb = trajectory[sl]
             mb_batch_size = len(mb)
-            mb_weight = mb_batch_size / batch_size
 
             for j in timestep_indices:
                 sigma = mb.timesteps[j]
@@ -208,7 +208,7 @@ class DDRLTrainer(BaseDiffusionTrainer):
                         )
 
                 loss = rl_loss + config.data_beta * data_loss
-                loss = loss * mb_weight / len(timestep_indices)
+                loss = loss / len(timestep_indices)
                 if loss.requires_grad:
                     loss.backward()
 
@@ -217,11 +217,11 @@ class DDRLTrainer(BaseDiffusionTrainer):
                 total_ratio += ratio.mean().item()
                 num_computed_steps += 1
 
-        torch.nn.utils.clip_grad_norm_(
-            [p for p in self.transformer.parameters() if p.requires_grad],
-            config.max_grad_norm,
-        )
-        self.optimizer.step()
+            torch.nn.utils.clip_grad_norm_(
+                [p for p in self.transformer.parameters() if p.requires_grad],
+                config.max_grad_norm,
+            )
+            self.optimizer.step()
 
         n = max(num_computed_steps, 1)
         return {

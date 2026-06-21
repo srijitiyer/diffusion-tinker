@@ -36,21 +36,26 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
         total_ratio = 0.0
         num_computed_steps = 0
 
-        self.optimizer.zero_grad()
         autocast_dtype = torch.bfloat16 if config.mixed_precision == "bf16" else torch.float16
 
-        # Mini-batch the gradient-tracked replay over trajectories. The rollout
-        # may hold many prompts at a large group size; replaying them all at once
-        # OOMs, so we split into chunks of train_batch_size and accumulate grads.
-        # Each chunk's loss is weighted by chunk_size / batch_size, so the summed
-        # gradient is identical to a single full-batch pass - just lower peak mem.
+        # Mini-batch the replay over trajectories and take one optimizer step per
+        # mini-batch (true minibatch SGD), not one accumulated step per epoch.
+        # The rollout may hold many prompts at a large group size; replaying them
+        # all in one forward OOMs, and folding everything into a single step gives
+        # just one update per epoch - far too few for RL to move the reward.
+        # Chunking into train_batch_size gives both bounded memory and many
+        # updates per epoch, which is what FlowGRPO actually does.
         batch_size = len(trajectory)
         mb_size = config.train_batch_size or batch_size
-        minibatches = [slice(s, min(s + mb_size, batch_size)) for s in range(0, batch_size, mb_size)]
+        # Shuffle so each mini-batch mixes prompts rather than stepping on one
+        # prompt's samples at a time (group_size > mb_size would otherwise make
+        # every step single-prompt and noisy).
+        perm = torch.randperm(batch_size, device=device)
+        minibatches = [perm[s:s + mb_size] for s in range(0, batch_size, mb_size)]
 
         for sl in minibatches:
+            self.optimizer.zero_grad()
             mb = trajectory[sl]
-            mb_weight = len(mb) / batch_size
 
             for j in timestep_indices:
                 sigma = mb.timesteps[j]
@@ -139,7 +144,7 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
                     kl_loss = kl_per_sample.mean()
 
                 loss = rl_loss + config.kl_beta * kl_loss
-                loss = loss * mb_weight / len(timestep_indices)
+                loss = loss / len(timestep_indices)
                 if loss.requires_grad:
                     loss.backward()
 
@@ -148,11 +153,11 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
                 total_ratio += ratio.mean().item()
                 num_computed_steps += 1
 
-        torch.nn.utils.clip_grad_norm_(
-            [p for p in self.transformer.parameters() if p.requires_grad],
-            config.max_grad_norm,
-        )
-        self.optimizer.step()
+            torch.nn.utils.clip_grad_norm_(
+                [p for p in self.transformer.parameters() if p.requires_grad],
+                config.max_grad_norm,
+            )
+            self.optimizer.step()
 
         n = max(num_computed_steps, 1)
         return {

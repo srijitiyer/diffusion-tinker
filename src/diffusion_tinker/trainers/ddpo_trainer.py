@@ -31,23 +31,24 @@ class DDPOTrainer(BaseDiffusionTrainer):
 
         autocast_dtype = torch.bfloat16 if config.mixed_precision == "bf16" else torch.float16
 
-        self.optimizer.zero_grad()
-
-        # Mini-batch the replay over trajectories so large group sizes fit in
-        # memory; gradients accumulate across chunks weighted by batch share,
-        # matching a single full-batch pass. (See FlowGRPO trainer.)
+        # Mini-batch the replay over trajectories and step once per mini-batch
+        # (true minibatch SGD), so large group sizes fit in memory and the reward
+        # gets many updates per epoch instead of one. (See FlowGRPO trainer.)
         batch_size = len(trajectory)
         mb_size = config.train_batch_size or batch_size
-        minibatches = [slice(s, min(s + mb_size, batch_size)) for s in range(0, batch_size, mb_size)]
 
         num_train = max(1, int(num_steps * config.timestep_fraction))
         for ppo_epoch in range(config.ppo_epochs):
             timestep_indices = list(range(num_train))
             random.shuffle(timestep_indices)
 
+            # Reshuffle the mini-batches each PPO pass (see FlowGRPO trainer).
+            perm = torch.randperm(batch_size, device=device)
+            minibatches = [perm[s:s + mb_size] for s in range(0, batch_size, mb_size)]
+
             for sl in minibatches:
+                self.optimizer.zero_grad()
                 mb = trajectory[sl]
-                mb_weight = len(mb) / batch_size
 
                 for j in timestep_indices:
                     sigma = mb.timesteps[j]
@@ -125,7 +126,7 @@ class DDPOTrainer(BaseDiffusionTrainer):
                         kl_loss = kl_per_sample.mean()
 
                     loss = rl_loss + config.kl_beta * kl_loss
-                    loss = loss * mb_weight / (len(timestep_indices) * config.ppo_epochs)
+                    loss = loss / len(timestep_indices)
                     if loss.requires_grad:
                         loss.backward()
 
@@ -134,11 +135,11 @@ class DDPOTrainer(BaseDiffusionTrainer):
                     total_ratio += ratio.mean().item()
                     total_computed += 1
 
-        torch.nn.utils.clip_grad_norm_(
-            [p for p in self.transformer.parameters() if p.requires_grad],
-            config.max_grad_norm,
-        )
-        self.optimizer.step()
+                torch.nn.utils.clip_grad_norm_(
+                    [p for p in self.transformer.parameters() if p.requires_grad],
+                    config.max_grad_norm,
+                )
+                self.optimizer.step()
 
         n = max(total_computed, 1)
         return {
