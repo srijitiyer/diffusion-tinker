@@ -303,6 +303,14 @@ class BaseDiffusionTrainer(ABC):
                     )
                     break
 
+            # Free this epoch's trajectory before the next rollout allocates a
+            # new one. Otherwise the old trajectory (latents for every sample)
+            # is still alive during the next epoch's sampling, doubling peak
+            # memory - which OOMs a 24GB card on the second epoch.
+            del trajectory
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
         self._save_checkpoint(self.config.num_epochs)
         self._fire_callbacks("on_train_end")
         print("Training complete.")
