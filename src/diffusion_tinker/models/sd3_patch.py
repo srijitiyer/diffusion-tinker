@@ -234,13 +234,24 @@ def sd3_replay_step(
     return log_prob, prev_sample_mean
 
 
-def _decode_latents(pipeline: StableDiffusion3Pipeline, latents: torch.Tensor) -> torch.Tensor:
-    """Decode latents to pixel space with SD3 normalization."""
+def _decode_latents(
+    pipeline: StableDiffusion3Pipeline, latents: torch.Tensor, chunk_size: int = 4
+) -> torch.Tensor:
+    """Decode latents to pixel space with SD3 normalization.
+
+    The VAE decoder upsamples to full 512x512 resolution, so decoding a whole
+    sample group (e.g. 24 images) at once is the single largest allocation in
+    the rollout and OOMs a 24GB card. Decode in small chunks to cap that peak;
+    the result is identical since the VAE is per-image.
+    """
     latents = latents / pipeline.vae.config.scaling_factor + pipeline.vae.config.shift_factor
-    images = pipeline.vae.decode(latents, return_dict=False)[0]
-    # SD3 VAE decode returns pixels in [-1, 1]; rescale to [0, 1] before clamping.
-    # Without the /2+0.5 the clamp crushes ~55% of pixels (everything <0) to black.
-    return (images / 2 + 0.5).clamp(0, 1)
+    outputs = []
+    for i in range(0, latents.shape[0], chunk_size):
+        images = pipeline.vae.decode(latents[i : i + chunk_size], return_dict=False)[0]
+        # SD3 VAE decode returns pixels in [-1, 1]; rescale to [0, 1] before clamping.
+        # Without the /2+0.5 the clamp crushes ~55% of pixels (everything <0) to black.
+        outputs.append((images / 2 + 0.5).clamp(0, 1))
+    return torch.cat(outputs, dim=0)
 
 
 def _tensor_to_pil(images: torch.Tensor) -> list[Image.Image]:

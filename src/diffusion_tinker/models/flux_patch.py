@@ -183,7 +183,14 @@ def flux_sample_with_logprob(
     latents_spatial = _unpack_latents(latents, height, width, channels=latent_channels)
     latents_spatial = latents_spatial / pipeline.vae.config.scaling_factor + pipeline.vae.config.shift_factor
     # VAE decode is [-1, 1]; rescale to [0, 1] before clamping (see sd3_patch).
-    images_tensor = (pipeline.vae.decode(latents_spatial, return_dict=False)[0] / 2 + 0.5).clamp(0, 1)
+    # Decode in small chunks so a large sample group doesn't OOM on the VAE
+    # upsample (the biggest single allocation in the rollout).
+    chunk_size = 4
+    chunks = []
+    for i in range(0, latents_spatial.shape[0], chunk_size):
+        dec = pipeline.vae.decode(latents_spatial[i : i + chunk_size], return_dict=False)[0]
+        chunks.append((dec / 2 + 0.5).clamp(0, 1))
+    images_tensor = torch.cat(chunks, dim=0)
 
     images_np = (images_tensor * 255).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
     images_np = images_np.transpose(0, 2, 3, 1)
