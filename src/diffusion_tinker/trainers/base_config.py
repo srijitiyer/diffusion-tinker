@@ -37,6 +37,11 @@ class BaseDiffusionConfig:
     num_inference_steps: int = 28
     num_eval_inference_steps: int = 28
     guidance_scale: float = 7.0
+    # SDE exploration noise. For FlowGRPO-style RL with a KL anchor, use ~0.7
+    # (the FlowGRPO value). Beware: the per-step KL penalty scales as
+    # 1/noise_level**2 (its variance is std_dev_t**2 ~ noise_level**2), so a
+    # small noise_level with kl_beta>0 silently over-weights the anchor and
+    # freezes the policy at the reference - stable but the reward never moves.
     noise_level: float = 0.1
     resolution: int = 512
 
