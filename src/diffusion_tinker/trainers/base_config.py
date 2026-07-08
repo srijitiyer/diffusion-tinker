@@ -32,6 +32,13 @@ class BaseDiffusionConfig:
     # actual setup) on a single GPU. None = replay the whole batch at once.
     train_batch_size: int | None = None
 
+    # When train_prompts is a large pool, sample this many prompts per epoch
+    # (a fresh random subset each epoch) instead of rolling out every prompt.
+    # Lets you train on a big, diverse prompt set - which gives the reward room
+    # to climb above the base model - without OOMing on num_prompts * group_size
+    # trajectories per epoch. None = use all prompts every epoch.
+    prompts_per_epoch: int | None = None
+
     # Sampling / rollout
     num_samples_per_prompt: int = 4
     num_inference_steps: int = 28

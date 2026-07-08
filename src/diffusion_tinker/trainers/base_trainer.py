@@ -252,7 +252,13 @@ class BaseDiffusionTrainer(ABC):
 
             epoch_prompts = self.train_prompts.copy()
             random.shuffle(epoch_prompts)
-            batch_prompts = epoch_prompts
+            ppe = self.config.prompts_per_epoch
+            if ppe and ppe < len(epoch_prompts):
+                # fresh random subset each epoch; over many epochs the whole pool
+                # is covered, giving diversity without a huge per-epoch rollout
+                batch_prompts = epoch_prompts[:ppe]
+            else:
+                batch_prompts = epoch_prompts
 
             trajectory = self._sample_trajectories(batch_prompts)
             self._fire_callbacks("on_sample_end", epoch=epoch, trajectory=trajectory)
