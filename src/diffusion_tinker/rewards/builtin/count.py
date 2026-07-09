@@ -66,9 +66,16 @@ class CountReward(BaseReward):
         with torch.no_grad():
             outputs = self._model(**inputs)
         target_sizes = torch.tensor([image.size[::-1]], device=self.device)
-        results = self._proc.post_process_object_detection(
-            outputs, threshold=self.threshold, target_sizes=target_sizes
-        )[0]
+        # transformers renamed this across versions: older exposes
+        # post_process_object_detection, newer only post_process_grounded_object_detection.
+        if hasattr(self._proc, "post_process_object_detection"):
+            results = self._proc.post_process_object_detection(
+                outputs, threshold=self.threshold, target_sizes=target_sizes
+            )[0]
+        else:
+            results = self._proc.post_process_grounded_object_detection(
+                outputs, threshold=self.threshold, target_sizes=target_sizes
+            )[0]
         return int(len(results["scores"]))
 
     def _score_single(self, image, n: int | None, obj: str | None) -> float:
