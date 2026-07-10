@@ -45,7 +45,7 @@ class CountReward(BaseReward):
 
     name = "count"
 
-    def __init__(self, device: str = "cpu", dtype: torch.dtype = torch.float32, threshold: float = 0.2):
+    def __init__(self, device: str = "cpu", dtype: torch.dtype = torch.float32, threshold: float = 0.1):
         super().__init__(device=device, dtype=dtype)
         self._model = None
         self._proc = None
@@ -66,15 +66,16 @@ class CountReward(BaseReward):
         with torch.no_grad():
             outputs = self._model(**inputs)
         target_sizes = torch.tensor([image.size[::-1]], device=self.device)
-        # transformers renamed this across versions: older exposes
-        # post_process_object_detection, newer only post_process_grounded_object_detection.
+        # transformers changed this across versions: <=4.x exposes
+        # post_process_object_detection; 5.x removed it and requires text_labels
+        # on post_process_grounded_object_detection (without it, zero detections).
         if hasattr(self._proc, "post_process_object_detection"):
             results = self._proc.post_process_object_detection(
                 outputs, threshold=self.threshold, target_sizes=target_sizes
             )[0]
         else:
             results = self._proc.post_process_grounded_object_detection(
-                outputs, threshold=self.threshold, target_sizes=target_sizes
+                outputs, threshold=self.threshold, target_sizes=target_sizes, text_labels=queries
             )[0]
         return int(len(results["scores"]))
 
