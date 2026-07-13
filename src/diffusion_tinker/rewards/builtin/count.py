@@ -61,6 +61,7 @@ class CountReward(BaseReward):
         self._model = Owlv2ForObjectDetection.from_pretrained(name).to(self.device).eval()
 
     def _count(self, image, obj: str) -> int:
+        self._ensure_loaded()
         queries = [[f"a photo of a {obj}"]]
         inputs = self._proc(text=queries, images=image, return_tensors="pt").to(self.device)
         with torch.no_grad():
