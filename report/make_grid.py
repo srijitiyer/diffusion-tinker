@@ -51,7 +51,8 @@ for ax, reward, title in [(axes[0], "count", "Object counting"), (axes[1], "ocr"
 axes[0].set_ylabel("eval reward (task accuracy)")
 axes[1].legend(loc="center right", fontsize=8, framealpha=0.9)
 fig.suptitle("FlowGRPO vs DDRL across anchor strength on two rewards\n"
-             "FlowGRPO's KL is robust; DDRL collapses without a sufficient data anchor (β=0.3 holds)",
+             "FlowGRPO's KL is robust (climbs/stable); DDRL collapses without a strong anchor - "
+             "even β=0.3 only delays it",
              fontsize=11)
 fig.tight_layout(rect=[0, 0, 1, 0.93])
 fig.savefig("report/grid_comparison.png", dpi=140)
@@ -67,13 +68,15 @@ for reward in ["count", "ocr"]:
             print(f"{reward:5} {label:22} no data")
             continue
         base, peak, final = ys[0], max(ys), ys[-1]
-        # headroom rewards: FlowGRPO reaches ~0.9-1.0, so a run ending well below
-        # that has collapsed (DDRL cells stop eval'ing once the reward crashes, so
-        # their final point is the last pre-collapse or a low post-crash value)
-        if final < 0.5:
+        # headroom rewards: working runs reach ~0.9-1.0. A run ending well below
+        # that has degraded. Distinguish a run that climbed first then crashed
+        # (peak high, final low) from one that never got off the ground.
+        if final >= 0.85:
+            v = "climb/stable-high"
+        elif final < 0.5 and peak >= 0.7:
+            v = "climb-then-COLLAPSE"
+        elif final < 0.5:
             v = "COLLAPSE"
-        elif peak >= base + 0.08:
-            v = "climb"
         else:
-            v = "stable"
+            v = "partial (climbs, degrades)"
         print(f"{reward:5} {label:22} base={base:.2f} peak={peak:.2f} final={final:.2f}  {v}")
