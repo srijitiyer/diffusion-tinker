@@ -23,83 +23,82 @@
 \maketitle
 \vspace{-1.5em}
 
-\noindent\textbf{diffusion-tinker} is a TRL-style library for RL post-training of diffusion models: you give it a model, a reward, and a set of prompts, and it runs one of six algorithms (FlowGRPO, DDRL, DRaFT, DiffusionDPO, DDPO, SFT) behind a single \code{Trainer}/\code{Config} API on top of HuggingFace \code{diffusers}. It targets Stable Diffusion 3.5 and FLUX.1.
+\noindent\textbf{diffusion-tinker} runs RL post-training for diffusion models: give it a model, a reward, and prompts, and it runs one of six algorithms (FlowGRPO, DDRL, DRaFT, DiffusionDPO, DDPO, SFT) behind one \code{Trainer}/\code{Config} API on top of \code{diffusers}. Targets SD3.5 and FLUX.1.
 
-This note collects the reproduction results. Every number is from a real run on the Stanford cluster (A5000 24\,GB, or A6000-Ada 48\,GB for FLUX), LoRA rank 16, bf16. The implementations were verified at the level of gradients-reaching-weights and correct pixel ranges first; Appendix~\ref{app:verify} lists what that turned up.
+Every number below is a real run on the Stanford cluster (A5000, or A6000-Ada for FLUX), LoRA rank 16, bf16. Code was fixed first (Appendix~\ref{app:verify}).
 
-\section{The main finding}
+\section{When RL actually helps}
 
-The single most useful result is about when RL helps at all: \textbf{an RL reward goes up when the base model has room to improve on it, and stays flat when the model is already near that reward's ceiling.} This is a property of the reward/model pairing, not a bug or a tuning failure, and it explains the rest of this note.
-
-Rewards with headroom climb: OCR (to 1.00), object counting (0.79 to $\sim$1.0), CLIP-score (27 to 29), aesthetic under DRaFT (5.9 to 9.6). Rewards SD3.5 is already good at stay flat: PickScore ($\sim$22.5) and HPS-v2 ($\sim$0.28) do not move, because there is nothing to push up. So the earlier puzzle of PickScore ``not working'' was really PickScore being the wrong reward to show a gain on.
+The reward goes up when the base model has room to improve, and stays flat when it is already good at the reward. OCR, counting, and CLIP-score climb. PickScore and HPS don't, because SD3.5 is already near their ceiling. So PickScore wasn't broken earlier, it was just the wrong reward to show a gain on.
 
 \section{Results}
 
 \begin{center}
-\begin{tabular}{@{}llll@{}}
+\small
+\begin{tabular}{@{}lll@{}}
 \toprule
-\textbf{Trainer} & \textbf{Task / reward} & \textbf{Result} & \textbf{Status} \\
+\textbf{Trainer} & \textbf{Result} & \textbf{Status} \\
 \midrule
-FlowGRPO     & OCR, counting, CLIP       & OCR 1.00; count 0.79$\to$1.0; CLIP 27$\to$29 & validated \\
-DRaFT        & aesthetic (LAION)         & 5.9 $\rightarrow$ 9.6            & validated \\
-DiffusionDPO & preference pairs          & winner/loser separation learned & validated \\
-SFT          & Naruto denoising          & flow-matching loss converges    & validated \\
-DDRL         & counting/OCR + data anchor & climbs with anchor, collapses without (\S\ref{sec:grid}) & validated w/ anchor \\
-DDPO/DPOK    & counting, OCR             & ratio $\sim$1.0, but reward does not reliably climb & tested, weak \\
+FlowGRPO     & OCR 1.00, count 0.79$\to$1.0, CLIP 27$\to$29 & validated \\
+DRaFT        & aesthetic 5.9 $\to$ 9.6                      & validated \\
+DiffusionDPO & winner/loser separation learned             & validated \\
+SFT          & Naruto denoising loss converges             & validated \\
+DDRL         & climbs with anchor, collapses without (\S\ref{sec:grid}) & needs anchor \\
+DDPO/DPOK    & ratio $\sim$1.0 but reward won't climb       & weak \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-DDPO is the one trainer that does not reliably move a reward, even on an easy headroom task with the fixed setup (counting degraded 0.34\,$\to$\,0.10, OCR net-flat). This is an algorithmic limit, PPO without GRPO's group-relative advantage, not a code bug: the ratio is corrected and gradients reach the weights.
+DDPO is the one trainer that won't reliably move a reward, even on an easy task (counting dropped 0.34$\to$0.10, OCR flat). That's the algorithm, not a bug: the ratio is fixed and gradients reach the weights. It's just PPO without GRPO's group-relative advantage.
 
-\section{Comprehensive grid: algorithm $\times$ anchor $\times$ reward}
+\section{The grid: algorithm $\times$ anchor $\times$ reward}
 \label{sec:grid}
 
-The rigorous comparison: FlowGRPO vs DDRL, each at anchor strength $\beta \in \{0,\text{mid},\text{high}\}$, on two headroom rewards (counting, OCR), matched budget (group 12, 20 rollout steps, noise 0.1, lr $10^{-4}$).
+FlowGRPO vs DDRL, three anchor strengths each, on counting and OCR. Same budget everywhere (group 12, 20 steps, noise 0.1, lr $10^{-4}$).
 
 \begin{figure}[h]
 \centering
 \includegraphics[width=\textwidth]{figures/grid_comparison.pdf}
-\caption{FlowGRPO's KL anchor is robust: it climbs or holds high at every $\beta$, on both rewards, and never collapses. DDRL collapses without an anchor ($\beta=0$, red) as expected; a stronger anchor ($\beta=0.3$, green) lets it climb first but only \emph{delays} the collapse, on OCR it reaches 1.0 then crashes back to 0.25. So the data anchor is real but weaker than the KL, and needs a larger $\beta$ (or a task-matched anchor set) to hold the whole run.}
+\caption{FlowGRPO's KL holds high at every $\beta$ on both rewards and never collapses. DDRL collapses with no anchor ($\beta=0$, red), as expected. A bigger anchor ($\beta=0.3$, green) climbs first but only delays it, on OCR it hits 1.0 then crashes to 0.25. So the data anchor works but is weaker than the KL, and needs a larger $\beta$ to hold the whole run.}
 \label{fig:grid}
 \end{figure}
 
-This confirms the anchor intuition directionally, no anchor collapses and an anchor lets the run survive and climb, while being honest that $\beta=0.3$ delays collapse rather than preventing it.
+The anchor story holds directionally (no anchor collapses, an anchor buys stability and a climb), but $\beta=0.3$ delays the collapse rather than stopping it.
 
-\section{Reward increase on a headroom task}
+\section{Counting: a reward that climbs}
 
-The clearest single demonstration that RL raises a reward when there is room: FlowGRPO on an object-counting reward, does the image contain the right number of objects, scored with an open-vocabulary detector.
+FlowGRPO on an object-counting reward (right number of objects, checked with an open-vocab detector). Count accuracy goes from $\sim$0.79 to 1.0 and holds near 0.9.
 
 \begin{figure}[h]
 \centering
-\includegraphics[width=0.75\textwidth]{figures/count_climb.pdf}
-\caption{Count accuracy climbs from $\sim$0.79 to a peak of 1.0 and holds near 0.9. A practical lesson: a detector-based reward needs coherent rollout images, so it needs more sampling steps and less exploration noise than PickScore does, otherwise the detector finds nothing and the reward is flat zero. There is a genuine tension between exploration noise for the RL and clean images for a strict reward.}
+\includegraphics[width=0.72\textwidth]{figures/count_climb.pdf}
+\caption{One catch worth knowing: a detector reward needs coherent images, so it wants more sampling steps and less noise than PickScore. Too few steps and the detector finds nothing, so the reward sits at zero and nothing trains.}
 \label{fig:count}
 \end{figure}
 
-\section{FLUX.1-schnell}
+\section{FLUX}
 
-The FLUX code path (auto-detection, packed latents, sampling/replay log-probs, schnell guidance, decode) runs end-to-end with FlowGRPO + aesthetic on the 48\,GB card. Convergence is modest and noisy: schnell is a four-step \emph{distilled} model not built for stochastic SDE sampling, and its importance ratio sits near 0.92 vs $\sim$1.0 on SD3. Status: code path validated on FLUX, convergence weak on schnell. FLUX.1-dev (non-distilled) is the better RL target and has not been run.
+The FLUX path runs end-to-end (FlowGRPO + aesthetic, 48\,GB card). It's noisy: schnell is a 4-step distilled model, bad for the stochastic sampling these methods need, and its ratio sits near 0.92 vs $\sim$1.0 on SD3. Code path works; FLUX.1-dev would be the better target and hasn't been run.
 
-\section{Limitations}
+\section{What's not done}
 
-Eval curves use a small number of prompts and are noisy, read the trend, not any single point. DDPO does not reliably improve rewards. DDRL's anchor at $\beta=0.3$ delays but does not fully prevent collapse. DiffusionDPO's re-run is currently blocked by Pick-a-Pic HF dataset gating. FLUX.1-dev is unrun.
+Eval uses few prompts, so curves are noisy, read the trend. DDPO doesn't reliably help. DDRL's anchor at $\beta=0.3$ delays but doesn't stop collapse. DiffusionDPO's re-run is blocked by Pick-a-Pic being gated on HF. FLUX.1-dev unrun.
 
 \appendix
 \section{Verification}
 \label{app:verify}
 
-The runs above are on code that was corrected first. The library had a passing test suite and clean smoke runs, but several trainers were not learning, because a smoke test that produces an image and a reward says nothing about whether gradients reach the weights or whether the reward is even moving. Checking directly turned up:
+The library passed its tests and smoke runs, but several trainers weren't learning, a smoke run that makes an image and a reward tells you nothing about whether gradients reach the weights or the reward moves. What that turned up:
 
 \begin{itemize}
 \setlength{\itemsep}{1pt}
-\item \textbf{One optimizer step per epoch.} The RL trainers folded a whole batch into a single update, so a long run did only a few dozen steps. Stepping per mini-batch is what actually let the reward move.
-\item \textbf{Importance-ratio bias.} Training the final near-zero-noise denoising step made the sampling-vs-replay ratio $\sim$0.92 instead of 1.0; dropping that step fixed it. Separately, sampling ran without autocast while replay ran with it, biasing the ratio, fixed by aligning precision.
-\item \textbf{DRaFT never trained.} A no-grad warmup populated \code{autocast}'s weight cache with detached bf16 casts of the LoRA weights, which the gradient loop reused, so every LoRA gradient came back \code{None}. Fixed with \code{cache\_enabled=False} (reward then 5.9\,$\to$\,9.6).
-\item \textbf{VAE range, both directions.} Decode clamped $[-1,1]$ straight to $[0,1]$ (55\% of every image crushed to black); encode fed $[0,1]$ to a VAE expecting $[-1,1]$.
-\item \textbf{Memory.} The rollout trajectory was kept alive into the next epoch's sampling (doubling peak memory) and the VAE decoded a whole sample group at once; freed per epoch and chunked the decode. Plus smaller fixes to the PEFT adapter API, the reward-model APIs across \code{transformers} versions, and the noise/KL interaction (low noise inflates the KL penalty $\sim 1/\text{noise}^2$, silently freezing the policy).
+\item \textbf{One optimizer step per epoch.} The RL trainers folded a whole batch into one update, so a long run did a few dozen steps total. Stepping per mini-batch is what let the reward move.
+\item \textbf{Ratio bias.} Training the last near-zero-noise step pushed the sampling-vs-replay ratio to $\sim$0.92; dropping it fixed that. Sampling also ran without autocast while replay ran with it, which I aligned.
+\item \textbf{DRaFT never trained.} A no-grad warmup cached detached bf16 casts of the LoRA weights, which the grad loop reused, so LoRA gradients came back \code{None}. Fixed with \code{cache\_enabled=False} (reward 5.9$\to$9.6).
+\item \textbf{VAE range, both ways.} Decode clamped $[-1,1]$ to $[0,1]$ with no $/2+0.5$ (55\% of every image went black); encode fed $[0,1]$ to a VAE wanting $[-1,1]$.
+\item \textbf{Memory.} The old trajectory stayed alive into the next epoch's sampling (2x peak memory) and the VAE decoded a whole group at once, freed per epoch and chunked the decode. Plus smaller fixes to the PEFT API, reward APIs across \code{transformers} versions, and the noise/KL interaction (low noise blows up the KL penalty as $1/\text{noise}^2$ and freezes the policy).
 \end{itemize}
 
-\noindent Because the earlier ``validated'' numbers were measured on broken images and latents, every result here is a fresh run on the fixed code. Source and per-run logs: \url{https://github.com/srijitiyer/diffusion-tinker}.
+\noindent The earlier ``validated'' numbers were on broken images and latents, so everything here is a fresh run on fixed code. Code and logs: \url{https://github.com/srijitiyer/diffusion-tinker}.
 
 \end{document}
