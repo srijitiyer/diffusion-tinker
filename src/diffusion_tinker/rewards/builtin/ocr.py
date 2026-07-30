@@ -65,11 +65,17 @@ class OCRReward(BaseReward):
         if self._reader is not None:
             return
 
+        # Run the detector on the same device as training when that is a GPU.
+        # A rollout scores group_size * num_prompts images every epoch, and the
+        # recognizer on CPU is slow enough to dominate epoch time; its weights are
+        # small next to the transformer, so co-residency is not the problem.
+        use_gpu = "cuda" in str(self.device)
+
         # Try EasyOCR first (works with PyTorch, no conflicts)
         try:
             import easyocr
 
-            self._reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+            self._reader = easyocr.Reader(["en"], gpu=use_gpu, verbose=False)
             self._backend = "easyocr"
             return
         except ImportError:
