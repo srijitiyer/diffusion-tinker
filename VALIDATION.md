@@ -32,17 +32,23 @@ rewards, mean reward (0.1302), mean advantage (0), and ratio (0.9977). Only the
 printed loss differs in the 4th decimal, which is bf16 GEMM nondeterminism across
 processes.
 
-**On the monotonic transform.** `use_monotonic_transform` defaults to False and
-should stay that way for anything we report. Haotian's own framing requires it
-off: he wrote that "if the data anchor beta decreases to 0, it's exactly FlowGRPO
-without KL divergence", and that equivalence does not hold with lambda applied.
-So the canonical DDRL is anchor on, transform off, and that is what the headline
-row should be.
+**On the monotonic transform: do not use it, and do not report it.** Haotian said
+in person (July 27) that they do not use it, because of the negative exponential.
+That matches what it does numerically: lambda(A) = -exp(-A) has range (-inf, 0),
+so applied to a zero-mean advantage every value is negative and the PPO term
+`-A * ratio` discourages every sampled action. His email framing requires it off
+too, since "if the data anchor beta decreases to 0, it's exactly FlowGRPO without
+KL divergence" is false with lambda applied.
 
-The re-centering below is a real bug fix for anyone who enables the flag, since
-un-centered it collapses the policy, but it is a footnote rather than a result.
-It is also worth knowing that once fixed it does not merely avoid collapse: it reached 0.893, above plain FlowGRPO's 0.702. That is
-explicable: λ(A)=-exp(-A) is risk-averse, penalizing low advantages far more than it rewards high ones, so
+So the canonical DDRL is **anchor on, transform off**, which is also the library
+default (`use_monotonic_transform=False`). Any DDRL number we report should be
+from that configuration.
+
+The re-centering is kept as a bug fix, because the flag exists and un-centered it
+collapses the policy, but the run below is **not a result and should not be
+quoted as one**. In particular, disregard any framing of it as the best
+configuration: it reached 0.893 against plain FlowGRPO's 0.702, which is
+explicable (λ is risk-averse, penalizing low advantages far more than it rewards high ones, so
 once it is centered (and therefore a valid policy-gradient weight) it concentrates
 updates on avoiding bad samples, while the forward-KL data anchor keeps the policy
 from drifting off the data manifold. Un-centered it did the opposite: it pushed
