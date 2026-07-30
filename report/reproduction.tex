@@ -92,7 +92,7 @@ Held-out OCR, 22 prompts $\times$ 2 samples, fixed eval seed, SD3.5-medium on an
 FlowGRPO ($\beta=0$)  & $0.130 \to \ldots$          & $0.494 \to 0.702$ & $0.9977$ \\
 DDRL ($\beta=0$)      & $0.130 \to 0.146 \to 0.315$ & $0.569$ & $0.9986$ \\
 DDPO                  & $0.130 \to 0.399 \to 0.530$ & $0.568$ & $0.9953$ \\
-DDRL + transform      & $0.502 \to 0.658 \to 0.787$ & $0.482 \to \mathbf{0.893}$ & $0.9993$ \\
+DDRL + transform      & $0.502 \to 0.658 \to 0.787$ & $0.482 \to \mathbf{0.893} \to \mathbf{0.892}$ & $0.9993$ \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -103,7 +103,7 @@ The last row is the configuration the previous report described as collapsing. R
 
 That inverts the previous report, and the direction makes sense. $\lambda(A) = -e^{-A}$ is risk-averse: it penalises low advantages far more than it rewards high ones. Once centred, and therefore a valid policy-gradient weight, it concentrates updates on avoiding bad samples while the forward-KL anchor keeps the policy near the data manifold. Un-centred it did the opposite, pushing down every action it sampled.
 
-It is still not proof of non-collapse: the old collapse appeared around epoch 10, so this run has to get there first.
+Through epoch 6 it climbs and then holds ($0.893$ then $0.892$), with no sign of the decay the previous report described. That is the shape the anchor is supposed to produce: reach a high level and stay there. The run continues to epoch 10, where the old collapse appeared, before non-collapse is stated as a result.
 
 \section{FlowGRPO($\beta{=}0$) and DDRL($\beta{=}0$) are the same thing}
 
