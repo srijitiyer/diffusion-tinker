@@ -65,22 +65,28 @@ pre-audit DDPO number is a FlowGRPO number.**
 
 | Reward | Climbs? | Notes |
 |--------|---------|-------|
-| OCR | **yes, 0.300 → 0.702 by epoch 4** | held-out, fixed seed, n=44, SEM ~0.06; monotonic across epochs 0/2/4 |
-| counting (OWLv2) | **yes, climbs at noise 0.7** | 0.561±0.083 (untrained) → 0.673 at ep2, n=24 held-out. Run at 0.7 deliberately, and it climbs, so the retracted claim that detection rewards need noise 0.1 does not survive: that was an artifact of the sigma=1 singularity, not a property of detector rewards |
-| clip_score | pending re-measure | 27→29 pre-audit |
-| aesthetic (DRaFT) | **yes 5.9→9.6** | no importance ratio, unaffected by the SDE defect |
-| aesthetic (FlowGRPO) | pending re-measure | previously flat; every FlowGRPO rollout at noise 0.7 had zero signal |
-| PickScore | **flat so far** | 23.03±0.23 (untrained) → 22.94 at ep2, n=24. Flat within one SEM, so the ceiling explanation may yet hold, but it now needs more epochs on signal-carrying rollouts before it can be asserted. Re-testing whether "flat because near the ceiling" survives now that rollouts carry signal |
-| hps_v2 | pending re-measure | same |
+| OCR | **yes, 0.300 → 0.702** | held-out, fixed seed, n=44; ~4.7σ at epoch 4 |
+| CLIP-score | **yes, 28.18 → 28.94** | monotonic across four evals, n=24 held-out |
+| counting (OWLv2) | **climbs then reverts** | 0.561 → 0.673 (ep2) → 0.617 → 0.584 → 0.541. Peaks ~2σ above the untrained baseline then falls back to it. Run at noise 0.7, so the retracted "detection rewards need noise 0.1" claim is dead either way, but this is not a sustained gain and needs a gentler lr before it can be called a climb |
+| aesthetic (FlowGRPO) | marginal | 5.651 → 5.684 → 5.667 → 5.739 |
+| aesthetic (DRaFT) | **yes 5.9→9.6 (pre-audit)** | re-run OOMs a 24GB A5000 even at truncation 1, group 1; DRaFT holds activations for every backpropagated step. Requeued smaller |
+| PickScore | **no, flat** | 23.03 → 22.94 → 23.04 → 22.85 → 22.89 → 23.05 → 22.97 across seven evals, all within one SEM (0.23) of the 23.03 untrained baseline |
+| hps_v2 | **no, flat** | 0.297 → 0.295 → 0.293 → 0.295 |
 
-The old headline claim was "RL increases a reward when the task has headroom, and
-stays flat when the base model is near the ceiling." The headroom half still
-holds and OCR demonstrates it. The *flat* half is no longer supported: those runs
-were at noise 0.7, where rollouts carried no signal at all, so flatness is not
-evidence about the reward's ceiling. Prompt difficulty is now calibrated against
-the base model rather than assumed, and no OCR tier is saturated (base 0.32-0.59
-depending on target length; the reward is length-normalized, so longer targets
-score higher).
+**The headroom thesis survives, and my retraction of it was too broad.** The
+original claim was that RL raises a reward when the task has headroom and stays
+flat when the base model is already near the reward's ceiling. I retracted the
+"flat" half during the audit, on the grounds that those runs had zero-signal
+rollouts so flatness proved nothing. That reasoning was right, but the conclusion
+was not: re-run on fixed code with rollouts that demonstrably carry signal
+(ratio ~0.999, non-zero within-group spread), PickScore is still flat across
+seven evals and HPS across four, while OCR and CLIP-score climb clearly. So the
+ceiling explanation now stands on evidence rather than on an artifact.
+
+Counting is the one that got more complicated rather than less. It climbs to
+~2σ above baseline by epoch 2 and then decays back to it, which is not the clean
+0.79 → 1.0 the pre-audit note claimed. Worth a gentler learning rate before
+reporting it either way.
 
 ## Models
 
