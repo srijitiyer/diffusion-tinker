@@ -296,7 +296,11 @@ class BaseDiffusionTrainer(ABC):
             if epoch > 0 and epoch % self.config.save_every == 0:
                 self._save_checkpoint(epoch)
 
-            if epoch > 0 and epoch % self.config.eval_every == 0:
+            # Include epoch 0. Without an untrained point on the same held-out
+            # prompts and the same eval seed there is nothing to compare the
+            # curve against, so "the reward climbed" is not a statement anyone
+            # can check.
+            if epoch % self.config.eval_every == 0:
                 self._evaluate(epoch)
 
                 if (
