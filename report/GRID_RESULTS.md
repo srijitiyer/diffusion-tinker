@@ -1,3 +1,18 @@
+> # RETRACTED (July 2026)
+>
+> The results below are **not valid** and are kept only for provenance. An audit
+> (`AUDIT.md`) found that the SDE sampler was singular at its first timestep,
+> which drove rollout reward and within-group spread to *exactly* zero at noise
+> 0.7, and that eval used four training prompts with no fixed seed, so every
+> curve here was measuring resampling noise rather than the policy.
+>
+> Specifically retracted: DDRL "collapsing" without a sufficient anchor (that was
+> an un-centered monotonic transform, not the anchor), DDPO being weaker for
+> lacking a group-relative advantage (it used the identical estimator), and the
+> importance ratio being a bf16 / gradient-checkpointing / CFG artifact.
+>
+> Current results: `VALIDATION.md` and `report/reproduction.pdf`.
+
 # Comprehensive grid: algorithms x anchor strength x reward model
 
 Matched budget for every cell: SD3.5-Medium, group size 12, 20 rollout steps,
