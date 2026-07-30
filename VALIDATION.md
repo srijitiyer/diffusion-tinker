@@ -18,7 +18,7 @@ smoke tests. "Validated" = the intended objective actually moves in a real run.
 | FlowGRPO | **validated** | held-out OCR 0.300 (untrained baseline) → 0.494 at epoch 2, ratio 0.9977; longer curve in flight |
 | DDRL (β=0) | **validated** | held-out OCR → 0.569 at epoch 2, train reward 0.130→0.146→0.315, ratio 0.9986. Identical to FlowGRPO(β=0) by construction, see below |
 | DDPO | **validated** | held-out OCR → 0.568 at epoch 2, train reward 0.130→0.399→0.530, ratio 0.9953. Now uses its own buffered per-prompt estimator |
-| DDRL (anchor + monotonic transform) | **pending** | the transform is now re-centered per group; the non-collapse run is in flight |
+| DDRL (anchor + monotonic transform) | **climbing, non-collapse not yet proven** | held-out OCR → 0.482 at epoch 2 vs 0.300 baseline, anchor term active (`data_loss=0.268`). Previously this configuration collapsed; it is now above baseline. But the old collapse appeared around epoch 10, so this needs ~10 epochs before "does not collapse" is a claim rather than a hope |
 | DRaFT | **validated (pre-audit)** | aesthetic 5.9→9.6. Has no importance ratio, so the SDE defect does not apply; the number stands but predates the eval fix |
 | SFT | **validated (pre-audit)** | flow-matching loss converges. Now also implemented for FLUX (was SD3-only) |
 | DiffusionDPO | **pending** | re-run blocked by Pick-a-Pic HF gating. Also had a missing 0.5 factor, so any prior run was at twice the intended beta |
