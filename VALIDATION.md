@@ -66,12 +66,12 @@ pre-audit DDPO number is a FlowGRPO number.**
 | Reward | Climbs? | Notes |
 |--------|---------|-------|
 | OCR | **yes, 0.300 → 0.702** | held-out, fixed seed, n=44; ~4.7σ at epoch 4 |
-| CLIP-score | **yes, 28.18 → 28.94** | monotonic across four evals, n=24 held-out |
+| CLIP-score | **modest rise, oscillates** | 28.18 (untrained) → 28.24 → 28.50 → 28.94 → 28.40, n=24 held-out. I called this monotonic after four points; the fifth broke that. Net above baseline but the swing is comparable to the gain |
 | counting (OWLv2) | **climbs then reverts** | 0.561 → 0.673 (ep2) → 0.617 → 0.584 → 0.541. Peaks ~2σ above the untrained baseline then falls back to it. Run at noise 0.7, so the retracted "detection rewards need noise 0.1" claim is dead either way, but this is not a sustained gain and needs a gentler lr before it can be called a climb |
-| aesthetic (FlowGRPO) | marginal | 5.651 → 5.684 → 5.667 → 5.739 |
+| aesthetic (FlowGRPO) | marginal upward drift | 5.651 → 5.684 → 5.667 → 5.739 → 5.751 |
 | aesthetic (DRaFT) | **yes 5.9→9.6 (pre-audit)** | re-run OOMs a 24GB A5000 even at truncation 1, group 1; DRaFT holds activations for every backpropagated step. Requeued smaller |
-| PickScore | **no, flat** | 23.03 → 22.94 → 23.04 → 22.85 → 22.89 → 23.05 → 22.97 across seven evals, all within one SEM (0.23) of the 23.03 untrained baseline |
-| hps_v2 | **no, flat** | 0.297 → 0.295 → 0.293 → 0.295 |
+| PickScore | **no, flat through epoch 12** | seven evals, 22.85 to 23.05, all within one SEM (0.23) of the 23.03 untrained baseline. Run retired as conclusive |
+| hps_v2 | **no, flat** | 0.297 → 0.295 → 0.293 → 0.295 → 0.296 across five evals |
 
 **The headroom thesis survives, and my retraction of it was too broad.** The
 original claim was that RL raises a reward when the task has headroom and stays
