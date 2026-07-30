@@ -18,7 +18,7 @@ smoke tests. "Validated" = the intended objective actually moves in a real run.
 | FlowGRPO | **validated** | held-out OCR 0.300±0.064 (untrained) → 0.494 → 0.702 → 0.640 → 0.847 → 0.757 (ep2..ep10), n=44. Climbs with oscillation, no collapse through epoch 10. ratio 0.9977-0.9995 |
 | DDRL (β=0) | **validated** | held-out OCR → 0.569 at epoch 2, train reward 0.130→0.146→0.315, ratio 0.9986. Identical to FlowGRPO(β=0) by construction, see below |
 | DDPO | **validated** | held-out OCR → 0.568 at epoch 2, train reward 0.130→0.399→0.530, ratio 0.9953. Now uses its own buffered per-prompt estimator |
-| DDRL (anchor, transform off) | **running** | The canonical configuration and the one Haotian described (small beta, gradual increase, no collapse). Not previously run: the earlier cells were beta=0 (which is FlowGRPO) and beta=0.05 with the transform on. beta=0.01 and 0.05 launched |
+| DDRL (anchor, transform off) | **climbing, matches the expected shape** | The canonical configuration. Held-out OCR against the 0.300 untrained baseline: beta=0.01 gives 0.457 (ep2) → 0.497 (ep4); beta=0.05 gives 0.530 → 0.653. Anchor active, ratio ~0.999. A gradual increase tracking FlowGRPO's level (0.494 → 0.702), which is the behaviour Haotian described for a small beta. Running |
 | DDRL (anchor + monotonic transform) | **opt-in flag, off by default** | 0.300 → 0.482 → 0.893±0.036 → 0.892 → 0.873 → 0.851 (ep2..ep10), n=44, anchor active (`data_loss` ~0.268), ratio 0.9993. Climbs then holds past epoch 10, where the old collapse appeared. Kept as evidence the re-centering fix works, not as a headline result |
 | DRaFT | **validated (pre-audit)** | aesthetic 5.9→9.6. Has no importance ratio, so the SDE defect does not apply; the number stands but predates the eval fix |
 | SFT | **validated (pre-audit)** | flow-matching loss converges. Now also implemented for FLUX (was SD3-only) |
@@ -66,11 +66,11 @@ pre-audit DDPO number is a FlowGRPO number.**
 | Reward | Climbs? | Notes |
 |--------|---------|-------|
 | OCR | **yes, 0.300 → 0.702 by epoch 4** | held-out, fixed seed, n=44, SEM ~0.06; monotonic across epochs 0/2/4 |
-| counting (OWLv2) | **pending re-measure** | climbed pre-audit, but at noise 0.1; the noise tradeoff it implied was an artifact |
+| counting (OWLv2) | **running at noise 0.7** | untrained baseline 0.561±0.083 (n=24) measured on held-out prompts. Run at 0.7 deliberately, to test the retracted claim that detection rewards need 0.1 |
 | clip_score | pending re-measure | 27→29 pre-audit |
 | aesthetic (DRaFT) | **yes 5.9→9.6** | no importance ratio, unaffected by the SDE defect |
 | aesthetic (FlowGRPO) | pending re-measure | previously flat; every FlowGRPO rollout at noise 0.7 had zero signal |
-| PickScore | pending re-measure | previously flat and attributed to ceiling; that conclusion is no longer supported |
+| PickScore | **running** | untrained baseline 23.03±0.23 (n=24); 22.94 at ep2, flat so far but within one SEM. Re-testing whether "flat because near the ceiling" survives now that rollouts carry signal |
 | hps_v2 | pending re-measure | same |
 
 The old headline claim was "RL increases a reward when the task has headroom, and
