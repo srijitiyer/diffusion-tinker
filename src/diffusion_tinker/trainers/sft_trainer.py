@@ -140,6 +140,8 @@ class SFTTrainer:
                 prompt_embeds=prompt_embeds,
                 pooled_embeds=pooled_prompt_embeds,
                 condition_dropout_mask=dropout_mask,
+                model_type=self._model_type,
+                guidance_scale=config.guidance_scale,
             )
 
         return {"loss": loss.item()}, loss

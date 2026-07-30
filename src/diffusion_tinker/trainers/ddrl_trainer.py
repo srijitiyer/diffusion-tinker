@@ -205,6 +205,8 @@ class DDRLTrainer(BaseDiffusionTrainer):
                             prompt_embeds=mb.prompt_embeds,
                             pooled_embeds=mb.pooled_embeds,
                             condition_dropout_mask=dropout_mask,
+                            model_type=self._model_type,
+                            guidance_scale=config.guidance_scale,
                         )
 
                 loss = rl_loss + config.data_beta * data_loss

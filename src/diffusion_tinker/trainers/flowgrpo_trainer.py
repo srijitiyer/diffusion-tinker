@@ -6,6 +6,7 @@ import random
 
 import torch
 
+from diffusion_tinker.core.noise_strategy import sde_diffusion_std
 from diffusion_tinker.core.trajectory import TrajectoryBatch
 from diffusion_tinker.trainers.base_trainer import BaseDiffusionTrainer
 from diffusion_tinker.trainers.flowgrpo_config import FlowGRPOConfig
@@ -131,12 +132,14 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
                         finally:
                             self.transformer.enable_adapters()
 
-                    sigma_val = sigma.float().clamp(max=0.9999)
                     dt = (sigma_next - sigma).float()
                     # Use the same noise level the replay step used for the mean
                     # (step_noise_level, which is 0 on the final step) so the KL
-                    # variance is consistent with the policy/reference means.
-                    std_dev_t = torch.sqrt(sigma_val / (1.0 - sigma_val)) * step_noise_level
+                    # variance is consistent with the policy/reference means, and
+                    # the same bounded coefficient the sampler used - otherwise at
+                    # sigma=1 this divides by a variance ~1e4 too large and the KL
+                    # penalty silently vanishes on the first step.
+                    std_dev_t = sde_diffusion_std(sigma.float(), sigma_next.float(), step_noise_level)
                     noise_std = std_dev_t * torch.sqrt((-dt).clamp(min=1e-12))
 
                     diff = (prev_sample_mean.float() - prev_sample_mean_ref.float()).pow(2)
