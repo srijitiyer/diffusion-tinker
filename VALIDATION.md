@@ -15,10 +15,10 @@ smoke tests. "Validated" = the intended objective actually moves in a real run.
 
 | Trainer | Status | Evidence |
 |---------|--------|----------|
-| FlowGRPO | **validated** | held-out OCR 0.300±0.064 (untrained) → 0.494±0.066 (ep2) → 0.702±0.056 (ep4), n=44. The ep4 gap is ~4.7σ. ratio 0.9977 |
+| FlowGRPO | **validated** | held-out OCR 0.300±0.064 (untrained) → 0.494 → 0.702 → 0.640 → 0.847 → 0.757 (ep2..ep10), n=44. Climbs with oscillation, no collapse through epoch 10. ratio 0.9977-0.9995 |
 | DDRL (β=0) | **validated** | held-out OCR → 0.569 at epoch 2, train reward 0.130→0.146→0.315, ratio 0.9986. Identical to FlowGRPO(β=0) by construction, see below |
 | DDPO | **validated** | held-out OCR → 0.568 at epoch 2, train reward 0.130→0.399→0.530, ratio 0.9953. Now uses its own buffered per-prompt estimator |
-| DDRL (anchor + monotonic transform) | **best performer; non-collapse not yet proven** | held-out OCR 0.300 → 0.482 (ep2) → **0.893±0.036** (ep4) → **0.892** (ep6), n=44. Climbs then holds. `data_loss` steady ~0.268 so the anchor stays active, ratio 0.9993. This is the configuration the old report called collapsing; re-centered it beats plain FlowGRPO (0.702 at ep4) and shows no sign of decay through epoch 6. Running to epoch 10, where the old collapse appeared |
+| DDRL (anchor + monotonic transform) | **best performer, stable through epoch 8** | held-out OCR 0.300 → 0.482 (ep2) → **0.893±0.036** (ep4) → **0.892** (ep6) → **0.873** (ep8), n=44. Climbs then holds. `data_loss` steady ~0.268 so the anchor stays active, ratio 0.9993. This is the configuration the old report called collapsing; re-centered it beats plain FlowGRPO (0.702 at ep4) and shows no sign of decay through epoch 6. Running to epoch 10, where the old collapse appeared. For reference FlowGRPO reached epoch 10 without collapsing either (0.494, 0.702, 0.640, 0.847, 0.757) |
 | DRaFT | **validated (pre-audit)** | aesthetic 5.9→9.6. Has no importance ratio, so the SDE defect does not apply; the number stands but predates the eval fix |
 | SFT | **validated (pre-audit)** | flow-matching loss converges. Now also implemented for FLUX (was SD3-only) |
 | DiffusionDPO | **pending** | re-run blocked by Pick-a-Pic HF gating. Also had a missing 0.5 factor, so any prior run was at twice the intended beta |
@@ -72,7 +72,7 @@ score higher).
 | Model | Status |
 |-------|--------|
 | SD3.5-Medium | **validated** on fixed code (table above) |
-| FLUX.1-dev | **code path fixed, feasibility pending.** Previously could not start at all: its scheduler sets `use_dynamic_shifting=True` and requires `mu`. Two blockers, both on atlas29 and neither in the code: at least one a6000-Ada there is wedged (passes `torch.cuda.is_available()`, then hangs on the first allocation), and that node reads `/atlas` at **4.7 MB/s** against 244 MB/s from the login node, so a 33 GB load needs ~2h of streaming. The sbatch now prewarms the page cache and retries until it gets a healthy GPU |
+| FLUX.1-dev | **validated: loads, fits, and trains.** Epoch 0 on one 48GB a6000-Ada: `reward=0.312, mean_ratio=0.9992`, 26.1M LoRA params, no OOM. The ratio matters twice over: FLUX has a different schedule (dynamic shifting, `mu`), so 0.9992 shows the sigma=1 fix is not SD3-specific. Getting there needed two workarounds, neither in the code: a wedged a6000-Ada on atlas29 (passes `torch.cuda.is_available()`, then hangs on the first allocation; the preflight now catches it in 2 min and a driver retries), and that node reading `/atlas` at **4.7 MB/s** against 244 MB/s from the login node. Streaming the 32GB once took `real 133m20s`, after which the model loaded from page cache in about a minute, versus the ~13h the mmap page-fault path was on track for |
 | FLUX.1-schnell | runs, but a 4-step distilled model is a poor SDE-RL target; its one aesthetic run declined (6.06→5.11→5.81) |
 
 FLUX also could not run DDRL with an anchor or SFT at all, because
