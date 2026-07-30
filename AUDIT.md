@@ -308,7 +308,14 @@ nothing.
 The sbatch preflight now runs under `timeout` and performs a real allocation and
 matmul rather than only `torch.cuda.is_available()`, because a wedged GPU can
 pass the latter and then block forever - which cost one 46-minute allocation that
-used 3 seconds of CPU. Separately, importing `torchvision.ops` /
+used 3 seconds of CPU. At least one a6000-Ada on atlas29 is in this state, and it
+is worth naming the wrong turn it caused: the symptom was a process crawling
+inside `pipeline.to(device)` with RSS growing ~44 MB/min, which looked exactly
+like `safetensors` mmap faulting pages off a contended NFS. Measuring settled it -
+sequential reads of the same blobs run at **244 MB/s**, so storage was never
+involved and the slow crawl was CUDA calls blocking on the bad GPU. The lesson is
+that "slow" and "wedged" present identically through RSS, and one `dd` separates
+them. Separately, importing `torchvision.ops` /
 `torch._dynamo` off this NFS can take five minutes or more under load, so an
 empty log early in a job is not evidence of a hang; `faulthandler.dump_traceback_later`
 is the way to tell the two apart.
