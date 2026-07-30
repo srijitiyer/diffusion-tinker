@@ -18,7 +18,8 @@ smoke tests. "Validated" = the intended objective actually moves in a real run.
 | FlowGRPO | **validated** | held-out OCR 0.300±0.064 (untrained) → 0.494 → 0.702 → 0.640 → 0.847 → 0.757 (ep2..ep10), n=44. Climbs with oscillation, no collapse through epoch 10. ratio 0.9977-0.9995 |
 | DDRL (β=0) | **validated** | held-out OCR → 0.569 at epoch 2, train reward 0.130→0.146→0.315, ratio 0.9986. Identical to FlowGRPO(β=0) by construction, see below |
 | DDPO | **validated** | held-out OCR → 0.568 at epoch 2, train reward 0.130→0.399→0.530, ratio 0.9953. Now uses its own buffered per-prompt estimator |
-| DDRL (anchor + monotonic transform) | **best performer, stable through epoch 8** | held-out OCR 0.300 → 0.482 (ep2) → **0.893±0.036** (ep4) → **0.892** (ep6) → **0.873** (ep8), n=44. Climbs then holds. `data_loss` steady ~0.268 so the anchor stays active, ratio 0.9993. This is the configuration the old report called collapsing; re-centered it beats plain FlowGRPO (0.702 at ep4) and shows no sign of decay through epoch 6. Running to epoch 10, where the old collapse appeared. For reference FlowGRPO reached epoch 10 without collapsing either (0.494, 0.702, 0.640, 0.847, 0.757) |
+| DDRL (anchor, transform off) | **running** | The canonical configuration and the one Haotian described (small beta, gradual increase, no collapse). Not previously run: the earlier cells were beta=0 (which is FlowGRPO) and beta=0.05 with the transform on. beta=0.01 and 0.05 launched |
+| DDRL (anchor + monotonic transform) | **opt-in flag, off by default** | 0.300 → 0.482 → 0.893±0.036 → 0.892 → 0.873 → 0.851 (ep2..ep10), n=44, anchor active (`data_loss` ~0.268), ratio 0.9993. Climbs then holds past epoch 10, where the old collapse appeared. Kept as evidence the re-centering fix works, not as a headline result |
 | DRaFT | **validated (pre-audit)** | aesthetic 5.9→9.6. Has no importance ratio, so the SDE defect does not apply; the number stands but predates the eval fix |
 | SFT | **validated (pre-audit)** | flow-matching loss converges. Now also implemented for FLUX (was SD3-only) |
 | DiffusionDPO | **pending** | re-run blocked by Pick-a-Pic HF gating. Also had a missing 0.5 factor, so any prior run was at twice the intended beta |
@@ -31,9 +32,17 @@ rewards, mean reward (0.1302), mean advantage (0), and ratio (0.9977). Only the
 printed loss differs in the 4th decimal, which is bf16 GEMM nondeterminism across
 processes.
 
-**The re-centered monotonic transform is the best configuration tested, not the
-worst.** That inverts the previous report completely. It makes sense: λ(A)=-exp(-A)
-is risk-averse, penalizing low advantages far more than it rewards high ones, so
+**On the monotonic transform.** `use_monotonic_transform` defaults to False and
+should stay that way for anything we report. Haotian's own framing requires it
+off: he wrote that "if the data anchor beta decreases to 0, it's exactly FlowGRPO
+without KL divergence", and that equivalence does not hold with lambda applied.
+So the canonical DDRL is anchor on, transform off, and that is what the headline
+row should be.
+
+The re-centering below is a real bug fix for anyone who enables the flag, since
+un-centered it collapses the policy, but it is a footnote rather than a result.
+It is also worth knowing that once fixed it does not merely avoid collapse: it reached 0.893, above plain FlowGRPO's 0.702. That is
+explicable: λ(A)=-exp(-A) is risk-averse, penalizing low advantages far more than it rewards high ones, so
 once it is centered (and therefore a valid policy-gradient weight) it concentrates
 updates on avoiding bad samples, while the forward-KL data anchor keeps the policy
 from drifting off the data manifold. Un-centered it did the opposite: it pushed
