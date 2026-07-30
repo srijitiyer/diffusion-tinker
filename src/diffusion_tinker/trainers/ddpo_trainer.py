@@ -7,6 +7,7 @@ import random
 import torch
 
 from diffusion_tinker.core.noise_strategy import sde_diffusion_std
+from diffusion_tinker.core.stat_tracking import BufferedPerPromptStatTracker
 from diffusion_tinker.core.trajectory import TrajectoryBatch
 from diffusion_tinker.trainers.base_trainer import BaseDiffusionTrainer
 from diffusion_tinker.trainers.ddpo_config import DDPOConfig
@@ -16,6 +17,18 @@ class DDPOTrainer(BaseDiffusionTrainer):
     """Trainer implementing DDPO/DPOK."""
 
     config: DDPOConfig
+
+    def _compute_advantages(self, trajectory: TrajectoryBatch) -> TrajectoryBatch:
+        """DDPO normalizes against a per-prompt reward history, not the batch."""
+        if not hasattr(self, "_ddpo_tracker"):
+            self._ddpo_tracker = BufferedPerPromptStatTracker(
+                buffer_size=self.config.stat_buffer_size,
+                min_count=self.config.stat_min_count,
+            )
+        advantages = self._ddpo_tracker.update(trajectory.prompts, trajectory.rewards)
+        advantages = torch.clamp(advantages, -self.config.adv_clip_max, self.config.adv_clip_max)
+        trajectory.advantages = advantages
+        return trajectory
 
     def _training_step(self, trajectory: TrajectoryBatch) -> dict[str, float]:
         """DDPO training step with optional multi-epoch PPO."""
