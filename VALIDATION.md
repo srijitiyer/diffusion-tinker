@@ -18,7 +18,7 @@ smoke tests. "Validated" = the intended objective actually moves in a real run.
 | FlowGRPO | **validated** | held-out OCR 0.300±0.064 (untrained) → 0.494±0.066 (ep2) → 0.702±0.056 (ep4), n=44. The ep4 gap is ~4.7σ. ratio 0.9977 |
 | DDRL (β=0) | **validated** | held-out OCR → 0.569 at epoch 2, train reward 0.130→0.146→0.315, ratio 0.9986. Identical to FlowGRPO(β=0) by construction, see below |
 | DDPO | **validated** | held-out OCR → 0.568 at epoch 2, train reward 0.130→0.399→0.530, ratio 0.9953. Now uses its own buffered per-prompt estimator |
-| DDRL (anchor + monotonic transform) | **climbing, non-collapse not yet proven** | held-out OCR → 0.482 at epoch 2 vs 0.300 baseline, anchor term active (`data_loss=0.268`). Previously this configuration collapsed; it is now above baseline. But the old collapse appeared around epoch 10, so this needs ~10 epochs before "does not collapse" is a claim rather than a hope |
+| DDRL (anchor + monotonic transform) | **best performer; non-collapse not yet proven** | held-out OCR 0.300 → 0.482±0.067 (ep2) → **0.893±0.036** (ep4), n=44. Train reward 0.502→0.658→0.787, `data_loss` steady ~0.268 so the anchor stays active, ratio 0.9993. This is the configuration the old report called collapsing; re-centered, it beats plain FlowGRPO (0.702 at ep4). Still needs ~epoch 10, where the old collapse appeared, before non-collapse is a claim |
 | DRaFT | **validated (pre-audit)** | aesthetic 5.9→9.6. Has no importance ratio, so the SDE defect does not apply; the number stands but predates the eval fix |
 | SFT | **validated (pre-audit)** | flow-matching loss converges. Now also implemented for FLUX (was SD3-only) |
 | DiffusionDPO | **pending** | re-run blocked by Pick-a-Pic HF gating. Also had a missing 0.5 factor, so any prior run was at twice the intended beta |
@@ -30,6 +30,14 @@ the same prompt subset in the same order and produced identical per-prompt
 rewards, mean reward (0.1302), mean advantage (0), and ratio (0.9977). Only the
 printed loss differs in the 4th decimal, which is bf16 GEMM nondeterminism across
 processes.
+
+**The re-centered monotonic transform is the best configuration tested, not the
+worst.** That inverts the previous report completely. It makes sense: λ(A)=-exp(-A)
+is risk-averse, penalizing low advantages far more than it rewards high ones, so
+once it is centered (and therefore a valid policy-gradient weight) it concentrates
+updates on avoiding bad samples, while the forward-KL data anchor keeps the policy
+from drifting off the data manifold. Un-centered it did the opposite: it pushed
+down every sampled action.
 
 **DDPO is now a different algorithm from FlowGRPO.** It previously never overrode
 `_compute_advantages`, so it inherited GRPO's within-batch tracker and *was*
