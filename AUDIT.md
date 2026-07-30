@@ -308,14 +308,31 @@ nothing.
 The sbatch preflight now runs under `timeout` and performs a real allocation and
 matmul rather than only `torch.cuda.is_available()`, because a wedged GPU can
 pass the latter and then block forever - which cost one 46-minute allocation that
-used 3 seconds of CPU. At least one a6000-Ada on atlas29 is in this state, and it
-is worth naming the wrong turn it caused: the symptom was a process crawling
-inside `pipeline.to(device)` with RSS growing ~44 MB/min, which looked exactly
-like `safetensors` mmap faulting pages off a contended NFS. Measuring settled it -
-sequential reads of the same blobs run at **244 MB/s**, so storage was never
-involved and the slow crawl was CUDA calls blocking on the bad GPU. The lesson is
-that "slow" and "wedged" present identically through RSS, and one `dd` separates
-them. Separately, importing `torchvision.ops` /
+used 3 seconds of CPU. At least one a6000-Ada on atlas29 is in this state.
+
+FLUX.1-dev also hit a second, independent problem on that node, and it took two
+wrong guesses to pin down. The symptom was a process crawling inside
+`pipeline.to(device)` with RSS growing ~44 MB/min. First guess: contended storage.
+A `dd` on the login node returned **244 MB/s**, which seemed to rule that out, so
+the second guess was that the wedged GPU was blocking the CUDA copies. Both were
+wrong about the location. Reading the *same file* from a job **on atlas29** gives:
+
+| where | sequential read of the same blob |
+|---|---|
+| login node (sc) | 244 MB/s |
+| atlas29 (compute) | **4.7 MB/s** |
+
+A 52x difference, and atlas24 loads SD3.5's ~10 GB in about two minutes, so this
+is specific to atlas29's path to `/atlas`, not to the filesystem generally. At
+4.7 MB/s a 33 GB model needs roughly two hours of pure reading, and letting
+`safetensors` mmap fault the pages in semi-randomly instead measured ~0.7 MB/s,
+which is the ~13-hour version. Streaming the blobs once before loading (`WARM` in
+the sbatch) converts the second case into the first.
+
+Two lessons worth keeping. "Slow" and "wedged" look identical through RSS growth,
+and a real allocation under `timeout` separates them. And a throughput number is
+only meaningful from the node that will do the reading - measuring on the login
+node produced a confidently wrong conclusion twice. Separately, importing `torchvision.ops` /
 `torch._dynamo` off this NFS can take five minutes or more under load, so an
 empty log early in a job is not evidence of a hang; `faulthandler.dump_traceback_later`
 is the way to tell the two apart.

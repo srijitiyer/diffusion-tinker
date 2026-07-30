@@ -64,7 +64,7 @@ score higher).
 | Model | Status |
 |-------|--------|
 | SD3.5-Medium | **validated** on fixed code (table above) |
-| FLUX.1-dev | **code path fixed, feasibility pending.** Previously could not start at all: its scheduler sets `use_dynamic_shifting=True` and requires `mu`. The remaining blocker is a wedged a6000-Ada on atlas29 (passes `torch.cuda.is_available()`, then hangs on the first allocation), not storage: sequential reads of the model blobs measure 244 MB/s |
+| FLUX.1-dev | **code path fixed, feasibility pending.** Previously could not start at all: its scheduler sets `use_dynamic_shifting=True` and requires `mu`. Two blockers, both on atlas29 and neither in the code: at least one a6000-Ada there is wedged (passes `torch.cuda.is_available()`, then hangs on the first allocation), and that node reads `/atlas` at **4.7 MB/s** against 244 MB/s from the login node, so a 33 GB load needs ~2h of streaming. The sbatch now prewarms the page cache and retries until it gets a healthy GPU |
 | FLUX.1-schnell | runs, but a 4-step distilled model is a poor SDE-RL target; its one aesthetic run declined (6.06→5.11→5.81) |
 
 FLUX also could not run DDRL with an anchor or SFT at all, because
@@ -74,8 +74,8 @@ unpacked latents, `timestep = sigma*1000`). Fixed and shape-verified.
 ## Known gaps
 
 - **FLUX.1-dev feasibility** (does 12B + LoRA fit and train on one 48GB card) is
-  the main open question. Only atlas29 has 48GB cards, and at least one of them is
-  wedged, so getting a healthy allocation takes retries.
+  the main open question. Only atlas29 has 48GB cards; at least one is wedged, and
+  the node reads /atlas at 4.7 MB/s, so each attempt costs ~2h of model loading.
 - **DiffusionDPO re-run** needs Pick-a-Pic terms accepted on HF.
 - Several reward rows above need re-measuring on fixed code; they are marked.
 - Deliberate deviations, not bugs: the log-prob is mean-reduced rather than
