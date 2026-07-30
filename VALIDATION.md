@@ -15,7 +15,7 @@ smoke tests. "Validated" = the intended objective actually moves in a real run.
 
 | Trainer | Status | Evidence |
 |---------|--------|----------|
-| FlowGRPO | **validated** | held-out OCR 0.300 (untrained baseline) → 0.494 at epoch 2, ratio 0.9977; longer curve in flight |
+| FlowGRPO | **validated** | held-out OCR 0.300±0.064 (untrained) → 0.494±0.066 (ep2) → 0.702±0.056 (ep4), n=44. The ep4 gap is ~4.7σ. ratio 0.9977 |
 | DDRL (β=0) | **validated** | held-out OCR → 0.569 at epoch 2, train reward 0.130→0.146→0.315, ratio 0.9986. Identical to FlowGRPO(β=0) by construction, see below |
 | DDPO | **validated** | held-out OCR → 0.568 at epoch 2, train reward 0.130→0.399→0.530, ratio 0.9953. Now uses its own buffered per-prompt estimator |
 | DDRL (anchor + monotonic transform) | **climbing, non-collapse not yet proven** | held-out OCR → 0.482 at epoch 2 vs 0.300 baseline, anchor term active (`data_loss=0.268`). Previously this configuration collapsed; it is now above baseline. But the old collapse appeared around epoch 10, so this needs ~10 epochs before "does not collapse" is a claim rather than a hope |
@@ -42,7 +42,7 @@ pre-audit DDPO number is a FlowGRPO number.**
 
 | Reward | Climbs? | Notes |
 |--------|---------|-------|
-| OCR | **yes, 0.300 → 0.494-0.569 by epoch 2** | held-out, fixed seed, n=44, SEM ~0.065 |
+| OCR | **yes, 0.300 → 0.702 by epoch 4** | held-out, fixed seed, n=44, SEM ~0.06; monotonic across epochs 0/2/4 |
 | counting (OWLv2) | **pending re-measure** | climbed pre-audit, but at noise 0.1; the noise tradeoff it implied was an artifact |
 | clip_score | pending re-measure | 27→29 pre-audit |
 | aesthetic (DRaFT) | **yes 5.9→9.6** | no importance ratio, unaffected by the SDE defect |

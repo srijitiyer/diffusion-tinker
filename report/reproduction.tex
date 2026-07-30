@@ -87,9 +87,9 @@ Held-out OCR, 22 prompts $\times$ 2 samples, fixed eval seed, SD3.5-medium on an
 \small
 \begin{tabular}{@{}lrrr@{}}
 \toprule
-& \textbf{train reward} & \textbf{held-out, epoch 2} & \textbf{ratio} \\
+& \textbf{train reward} & \textbf{held-out} & \textbf{ratio} \\
 \midrule
-FlowGRPO ($\beta=0$)  & $0.130$ (in flight)          & $0.494$ & $0.9977$ \\
+FlowGRPO ($\beta=0$)  & $0.130 \to \ldots$          & $0.494 \to 0.702$ & $0.9977$ \\
 DDRL ($\beta=0$)      & $0.130 \to 0.146 \to 0.315$ & $0.569$ & $0.9986$ \\
 DDPO                  & $0.130 \to 0.399 \to 0.530$ & $0.568$ & $0.9953$ \\
 DDRL + transform      & anchor active               & $0.482$ & n/a \\
@@ -97,7 +97,7 @@ DDRL + transform      & anchor active               & $0.482$ & n/a \\
 \end{tabular}
 \end{center}
 
-All four are above the untrained baseline after two epochs, by roughly two to three standard errors, and the ratio stays within $0.5\%$ of 1 throughout.
+All four are above the untrained baseline after two epochs, by roughly two to three standard errors, and the ratio stays within $0.5\%$ of 1 throughout. FlowGRPO has a second point: $0.494 \pm 0.066$ at epoch 2 and $0.702 \pm 0.056$ at epoch 4, against a baseline of $0.300 \pm 0.064$. That last gap is $0.402$ against a combined standard error of $0.085$, so about $4.7\sigma$, so the reward is unambiguously climbing, which is the thing that never happened before the sampler was fixed.
 
 The last row is the configuration the previous report described as collapsing. With the transform re-centred it is above baseline instead, and its anchor term is active ($\code{data\_loss}=0.268$). That is not yet proof it does not collapse: the old collapse appeared around epoch 10, so this run needs to get there first. Longer curves for it and for FlowGRPO are still in flight.
 
