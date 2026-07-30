@@ -250,6 +250,22 @@ class BaseDiffusionTrainer(ABC):
         for epoch in range(self.config.num_epochs):
             self._fire_callbacks("on_epoch_begin", epoch=epoch)
 
+            # Evaluate before the epoch's update, not after, so "Eval (epoch 0)"
+            # is the untrained model. Evaluating after meant the first point was
+            # already one update in, which is not a baseline and made two runs
+            # that differ only in beta disagree at epoch 0.
+            if epoch % self.config.eval_every == 0:
+                self._evaluate(epoch)
+                if (
+                    self.config.early_stop_patience
+                    and self._evals_without_improvement >= self.config.early_stop_patience
+                ):
+                    print(
+                        f"Early stopping: no eval improvement for {self.config.early_stop_patience} evals "
+                        f"(best={self._best_eval_reward:.3f})"
+                    )
+                    break
+
             epoch_prompts = self.train_prompts.copy()
             random.shuffle(epoch_prompts)
             ppe = self.config.prompts_per_epoch
@@ -295,23 +311,6 @@ class BaseDiffusionTrainer(ABC):
 
             if epoch > 0 and epoch % self.config.save_every == 0:
                 self._save_checkpoint(epoch)
-
-            # Include epoch 0. Without an untrained point on the same held-out
-            # prompts and the same eval seed there is nothing to compare the
-            # curve against, so "the reward climbed" is not a statement anyone
-            # can check.
-            if epoch % self.config.eval_every == 0:
-                self._evaluate(epoch)
-
-                if (
-                    self.config.early_stop_patience > 0
-                    and self._evals_without_improvement >= self.config.early_stop_patience
-                ):
-                    print(
-                        f"Early stopping: no eval improvement for {self.config.early_stop_patience} evals "
-                        f"(best={self._best_eval_reward:.3f})"
-                    )
-                    break
 
             # Free this epoch's trajectory before the next rollout allocates a
             # new one. Otherwise the old trajectory (latents for every sample)
