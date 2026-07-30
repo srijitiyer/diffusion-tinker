@@ -15,7 +15,7 @@
 \titlespacing{\section}{0pt}{1.3em}{0.4em}
 \newcommand{\code}[1]{\texttt{\small #1}}
 
-\title{\vspace{-2em}\textbf{diffusion-tinker: reproduction results}}
+\title{\vspace{-2em}\textbf{diffusion-tinker: audit and reproduction}}
 \author{Srijit Iyer}
 \date{July 2026}
 
@@ -25,80 +25,119 @@
 
 \noindent\textbf{diffusion-tinker} runs RL post-training for diffusion models: give it a model, a reward, and prompts, and it runs one of six algorithms (FlowGRPO, DDRL, DRaFT, DiffusionDPO, DDPO, SFT) behind one \code{Trainer}/\code{Config} API on top of \code{diffusers}. Targets SD3.5 and FLUX.1.
 
-Every number below is a real run on the Stanford cluster (A5000, or A6000-Ada for FLUX), LoRA rank 16, bf16. Code was fixed first (Appendix~\ref{app:verify}).
+This version supersedes the earlier report. An audit found ten defects, two of which invalidate most of what the previous version claimed. The headline one: the SDE sampler was singular at its first timestep, which destroyed every rollout at the noise level we ran OCR at. Details in \code{AUDIT.md}; the consequences are in \S\ref{sec:retract}.
 
-\section{When RL actually helps}
+\section{The bug that explains the rest}
 
-The reward goes up when the base model has room to improve, and stays flat when it is already good at the reward. OCR, counting, and CLIP-score climb. PickScore and HPS don't, because SD3.5 is already near their ceiling. So PickScore wasn't broken earlier, it was just the wrong reward to show a gain on.
+\code{sde\_step\_with\_logprob} uses $\sigma_t = \text{noise}\cdot\sqrt{\sigma/(1-\sigma)}$ as the diffusion coefficient. The SD3.5 and FLUX schedules start at $\sigma$ exactly $1.0$, so that term diverges. A clamp kept it finite but left the first Euler step multiplying the latent by $-55.8$ at noise $0.7$ (and $-0.16$ at $0.1$, so the two noise levels were not even comparable). Every later step sits between $0.73$ and $1.00$.
 
-\section{Results}
+The algebra is right. Our mean is $x + dt\,[v + \tfrac{\sigma_t^2}{2\sigma}(x + (1-\sigma)v)]$, the reverse SDE for rectified flow with score $\nabla\log p_t = -(x+(1-\sigma)v)/\sigma$, and it matches the reference. The score is finite at $\sigma=1$; only the diffusion coefficient blows up. Capping it so the step stays contractive fixes it and, on the real schedules, changes nothing after step~0.
 
 \begin{center}
 \small
-\begin{tabular}{@{}lll@{}}
+\begin{tabular}{@{}llrrrr@{}}
 \toprule
-\textbf{Trainer} & \textbf{Result} & \textbf{Status} \\
+& \textbf{noise} & \textbf{latent std} & \textbf{reward} & \textbf{reward std} & \textbf{ratio} \\
 \midrule
-FlowGRPO     & OCR 1.00, count 0.79$\to$1.0, CLIP 27$\to$29 & validated \\
-DRaFT        & aesthetic 5.9 $\to$ 9.6                      & validated \\
-DiffusionDPO & winner/loser separation learned             & validated \\
-SFT          & Naruto denoising loss converges             & validated \\
-DDRL         & climbs with anchor, collapses without (\S\ref{sec:grid}) & needs anchor \\
-DDPO/DPOK    & ratio $\sim$1.0 but reward won't climb       & weak \\
+before & 0.7 & 10.259 & \textbf{0.000} & \textbf{0.000} & n/a \\
+before & 0.1 & 1.371 & 0.479 & 0.259 & 0.9420 \\
+after  & 0.7 & 1.052 & 0.417 & 0.454 & \textbf{0.9993} \\
+after  & 0.1 & 1.076 & 0.375 & 0.518 & 0.9721 \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-DDPO is the one trainer that won't reliably move a reward, even on an easy task (counting dropped 0.34$\to$0.10, OCR flat). That's the algorithm, not a bug: the ratio is fixed and gradients reach the weights. It's just PPO without GRPO's group-relative advantage.
+At noise $0.7$ the rollout reward was \emph{exactly} zero with \emph{exactly} zero within-group spread. The GRPO advantage is $(r-\bar r)/(\text{std}+\epsilon)$, so zero spread means zero advantage and the epoch was skipped outright. Eval never showed this because eval samples at noise $0$, where the term vanishes: a noise-0 eval of the same prompts scored $0.569$ while the rollout scored $0.005$.
 
-\section{The grid: algorithm $\times$ anchor $\times$ reward}
-\label{sec:grid}
+This also settles the importance ratio. It sat near $0.92$ for weeks and was blamed on bf16 rounding, gradient checkpointing, and CFG in turn. It was this, and CFG was never involved (measured $0.92$ on versus $0.94$ off, and sampling stores the encoded negative embeddings that replay reuses, so both branches see identical conditioning).
 
-FlowGRPO vs DDRL, three anchor strengths each, on counting and OCR. Same budget everywhere (group 12, 20 steps, noise 0.1, lr $10^{-4}$).
+\section{Eval was measuring noise}
 
-\begin{figure}[h]
-\centering
-\includegraphics[width=\textwidth]{figures/grid_comparison.pdf}
-\caption{FlowGRPO's KL holds high at every $\beta$ on both rewards and never collapses. DDRL collapses with no anchor ($\beta=0$, red), as expected. A bigger anchor ($\beta=0.3$, green) climbs first but only delays it, on OCR it hits 1.0 then crashes to 0.25. So the data anchor works but is weaker than the KL, and needs a larger $\beta$ to hold the whole run.}
-\label{fig:grid}
-\end{figure}
+\code{\_evaluate} used \code{train\_prompts[:4]} and passed no generator. So it was four prompts, taken from the training set, sampled from whatever global RNG state training happened to leave behind, meaning different latents every epoch. That is the $\pm 0.5$ epoch-to-epoch swing in every curve this project has produced. Those curves were not noisy measurements of a trend, they were noise.
 
-The anchor story holds directionally (no anchor collapses, an anchor buys stability and a climb), but $\beta=0.3$ delays the collapse rather than stopping it.
+Eval now takes a configurable held-out prompt list, repeats each prompt, draws from a dedicated seeded generator so every epoch sees identical latents, chunks sampling so a large set does not OOM the VAE decode, reports a standard error, and runs at epoch 0 so there is a baseline to compare against.
 
-\section{Counting: a reward that climbs}
+\section{Reward difficulty, measured instead of guessed}
 
-FlowGRPO on an object-counting reward (right number of objects, checked with an open-vocab detector). Count accuracy goes from $\sim$0.79 to 1.0 and holds near 0.9.
+The old OCR prompts were three-letter words. Calibrating against the base model at a fixed seed:
 
-\begin{figure}[h]
-\centering
-\includegraphics[width=0.72\textwidth]{figures/count_climb.pdf}
-\caption{One catch worth knowing: a detector reward needs coherent images, so it wants more sampling steps and less noise than PickScore. Too few steps and the detector finds nothing, so the reward sits at zero and nothing trains.}
-\label{fig:count}
-\end{figure}
+\begin{center}
+\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{target} & \textbf{base mean} & \textbf{within-group std} \\
+\midrule
+3 char     & 0.319 & 0.470 \\
+4--5 char  & 0.585 & 0.457 \\
+6 char     & 0.549 & 0.468 \\
+8 char     & 0.422 & 0.436 \\
+two words  & 0.569 & 0.443 \\
+\bottomrule
+\end{tabular}
+\end{center}
 
-\section{FLUX}
+The reward is length-normalised edit distance, so one wrong character costs $1/3$ on ``CAT'' but $1/6$ on ``BAKERY'', so longer targets score \emph{higher}. No tier is saturated, so the earlier report of OCR base $=1.00$ is not reproducible under a fixed-seed measurement. Train and eval splits are now disjoint in both prompts and target strings.
 
-The FLUX path runs end-to-end (FlowGRPO + aesthetic, 48\,GB card). It's noisy: schnell is a 4-step distilled model, bad for the stochastic sampling these methods need, and its ratio sits near 0.92 vs $\sim$1.0 on SD3. Code path works; FLUX.1-dev would be the better target and hasn't been run.
+\section{Results on fixed code}
+\label{sec:results}
 
-\section{What's not done}
+Held-out OCR, 22 prompts $\times$ 2 samples, fixed eval seed, SD3.5-medium on an A5000, noise $0.7$, group 12, lr $10^{-4}$. Untrained baseline on the same set and seed: $\mathbf{0.300 \pm 0.064}$ ($n=44$).
 
-Eval uses few prompts, so curves are noisy, read the trend. DDPO doesn't reliably help. DDRL's anchor at $\beta=0.3$ delays but doesn't stop collapse. DiffusionDPO's re-run is blocked by Pick-a-Pic being gated on HF. FLUX.1-dev unrun.
+\begin{center}
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+& \textbf{train reward} & \textbf{held-out, epoch 2} & \textbf{ratio} \\
+\midrule
+FlowGRPO ($\beta=0$)  & $0.130$ (in flight)          & $0.494$ & $0.9977$ \\
+DDRL ($\beta=0$)      & $0.130 \to 0.146 \to 0.315$ & $0.569$ & $0.9986$ \\
+DDPO                  & $0.130 \to 0.399 \to 0.530$ & $0.568$ & $0.9953$ \\
+\bottomrule
+\end{tabular}
+\end{center}
 
-\appendix
-\section{Verification}
-\label{app:verify}
+All three are roughly two to three standard errors above the untrained baseline after two epochs, and the ratio stays within $0.5\%$ of 1 throughout. Longer curves and the DDRL monotonic-transform run are still in flight.
 
-The library passed its tests and smoke runs, but several trainers weren't learning, a smoke run that makes an image and a reward tells you nothing about whether gradients reach the weights or the reward moves. What that turned up:
+\section{FlowGRPO($\beta{=}0$) and DDRL($\beta{=}0$) are the same thing}
+
+They are identical in source, not merely similar. The base advantage clamps the group-normalised reward to $\pm 5$, and DDRL's reduces to exactly that once \code{beta\_temp}$=1$ skips the divide and the monotonic transform is off. FlowGRPO's only extra term, \code{use\_grpo\_guard}, defaults off, and at $\beta=0$ both assemble the same clipped-PPO loss.
+
+Empirically, at epoch 0 from the same seed, both selected the same prompt subset in the same order and produced identical per-prompt rewards
+\[
+[0.08,\; 0.08,\; 0.00,\; 0.29,\; 0.17,\; 0.17,\; 0.08,\; 0.17],
+\]
+identical mean reward $0.1302$, identical mean advantage $0$, and identical ratio $0.9977$. Only the printed loss differs in the fourth decimal ($0.0005$ versus $0.0004$), which is bf16 GEMM nondeterminism between two processes. Curves diverge after the first update because RL amplifies that difference through its own feedback loop, so per-epoch equality past epoch 0 is not achievable across processes and is not the right thing to ask for.
+
+\section{DDPO was never DDPO}
+
+\code{DDPOTrainer} never overrode \code{\_compute\_advantages}, so it inherited the within-batch group-normalised tracker and was FlowGRPO with a different clip range. The claim in its own docstring, that it lacks group normalisation, was false, and backwards historically: \code{PerPromptStatTracker} comes from DDPO, and the real one keeps a rolling per-prompt reward history with a fallback to batch statistics.
+
+It now uses that. The signature is visible in the logs above: FlowGRPO and DDRL report mean advantage \emph{exactly} $0$, because group normalisation forces it, while DDPO reports $0.089$ then $0.101$, because it normalises against history instead. Two different estimators, and on this task DDPO climbs fastest. \textbf{Every earlier DDPO number should be read as a FlowGRPO number.}
+
+\section{DDRL's monotonic transform}
+
+$\lambda(A) = -e^{-A}$ is a legitimate monotonic, risk-averse reweighting, but its range is $(-\infty, 0)$, so applied to a zero-mean advantage every value comes out negative. In $-A\cdot\text{ratio}$ that discourages every sampled action, so the policy walks away from its own distribution, and the unbounded negative side makes it violent. That, not a weak anchor, is what the earlier report called ``DDRL collapses''.
+
+The theorem does not have this problem because it maximises over $p_\theta$ as a distribution, so $\int p_\theta = 1$ is carried by a multiplier and the stationary solution is still normalised. The PPO surrogate enforces no such constraint. Subtracting a per-group baseline restores the zero-mean advantage the surrogate needs and leaves the policy gradient unbiased, since $\mathbb{E}[(A-b)\nabla\log\pi] = \mathbb{E}[A\nabla\log\pi]$, while $\lambda$'s monotonicity preserves the ranking exactly.
+
+\section{What the previous report got wrong}
+\label{sec:retract}
 
 \begin{itemize}
 \setlength{\itemsep}{1pt}
-\item \textbf{One optimizer step per epoch.} The RL trainers folded a whole batch into one update, so a long run did a few dozen steps total. Stepping per mini-batch is what let the reward move.
-\item \textbf{Ratio bias.} Training the last near-zero-noise step pushed the sampling-vs-replay ratio to $\sim$0.92; dropping it fixed that. Sampling also ran without autocast while replay ran with it, which I aligned.
-\item \textbf{DRaFT never trained.} A no-grad warmup cached detached bf16 casts of the LoRA weights, which the grad loop reused, so LoRA gradients came back \code{None}. Fixed with \code{cache\_enabled=False} (reward 5.9$\to$9.6).
-\item \textbf{VAE range, both ways.} Decode clamped $[-1,1]$ to $[0,1]$ with no $/2+0.5$ (55\% of every image went black); encode fed $[0,1]$ to a VAE wanting $[-1,1]$.
-\item \textbf{Memory.} The old trajectory stayed alive into the next epoch's sampling (2x peak memory) and the VAE decoded a whole group at once, freed per epoch and chunked the decode. Plus smaller fixes to the PEFT API, reward APIs across \code{transformers} versions, and the noise/KL interaction (low noise blows up the KL penalty as $1/\text{noise}^2$ and freezes the policy).
+\item ``DDRL collapses without a sufficient anchor; FlowGRPO's KL is more robust.'' That was the un-centred transform.
+\item ``DDPO is genuinely weaker because it lacks a group-relative advantage.'' It had the identical estimator.
+\item ``The ratio is $0.92$ because of bf16 / checkpointing / CFG.'' It was the $\sigma=1$ singularity.
+\item ``Detection rewards need noise $0.1$, OCR needs $0.7$.'' An artifact of the same bug.
+\item ``The FLUX path is validated.'' Only schnell. FLUX.1-dev could not build a schedule at all, and DDRL with an anchor and SFT were unimplemented for FLUX.
+\item Any eval curve produced before this audit, including the grid figure, since eval had no fixed seed.
 \end{itemize}
 
-\noindent The earlier ``validated'' numbers were on broken images and latents, so everything here is a fresh run on fixed code. Code and logs: \url{https://github.com/srijitiyer/diffusion-tinker}.
+\section{Still open}
+
+FLUX.1-dev now runs as far as loading; the feasibility run is blocked behind atlas storage contention rather than anything in the code (the same model loaded its text-encoder shards in 20\,s on a quiet node and 6\,min on a busy one). The DDRL monotonic-transform run and the longer FlowGRPO curve are in flight. DiffusionDPO's re-run is still blocked by Pick-a-Pic being gated on Hugging Face. Two deliberate deviations are worth remembering: the log-prob is mean-reduced rather than summed, which is what makes \code{clip\_range}$=10^{-3}$ sane, and the counting reward is graded where GenEval's is binary, so those numbers are not directly comparable.
+
+\vspace{0.5em}
+\noindent Code, tests, and the full audit: \url{https://github.com/srijitiyer/diffusion-tinker}.
 
 \end{document}
