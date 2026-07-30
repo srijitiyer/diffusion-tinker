@@ -66,11 +66,11 @@ pre-audit DDPO number is a FlowGRPO number.**
 | Reward | Climbs? | Notes |
 |--------|---------|-------|
 | OCR | **yes, 0.300 → 0.702 by epoch 4** | held-out, fixed seed, n=44, SEM ~0.06; monotonic across epochs 0/2/4 |
-| counting (OWLv2) | **running at noise 0.7** | untrained baseline 0.561±0.083 (n=24) measured on held-out prompts. Run at 0.7 deliberately, to test the retracted claim that detection rewards need 0.1 |
+| counting (OWLv2) | **yes, climbs at noise 0.7** | 0.561±0.083 (untrained) → 0.673 at ep2, n=24 held-out. Run at 0.7 deliberately, and it climbs, so the retracted claim that detection rewards need noise 0.1 does not survive: that was an artifact of the sigma=1 singularity, not a property of detector rewards |
 | clip_score | pending re-measure | 27→29 pre-audit |
 | aesthetic (DRaFT) | **yes 5.9→9.6** | no importance ratio, unaffected by the SDE defect |
 | aesthetic (FlowGRPO) | pending re-measure | previously flat; every FlowGRPO rollout at noise 0.7 had zero signal |
-| PickScore | **running** | untrained baseline 23.03±0.23 (n=24); 22.94 at ep2, flat so far but within one SEM. Re-testing whether "flat because near the ceiling" survives now that rollouts carry signal |
+| PickScore | **flat so far** | 23.03±0.23 (untrained) → 22.94 at ep2, n=24. Flat within one SEM, so the ceiling explanation may yet hold, but it now needs more epochs on signal-carrying rollouts before it can be asserted. Re-testing whether "flat because near the ceiling" survives now that rollouts carry signal |
 | hps_v2 | pending re-measure | same |
 
 The old headline claim was "RL increases a reward when the task has headroom, and
