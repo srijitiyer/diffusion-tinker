@@ -87,6 +87,15 @@ class DDRLTrainer(BaseDiffusionTrainer):
         self._data_latents = torch.cat(all_latents, dim=0)
         print(f"  Cached {len(self._data_latents)} latents ({self._data_latents.nbytes / 1e6:.0f} MB)")
 
+    @staticmethod
+    def _recenter_per_group(advantages: torch.Tensor, prompts: list[str]) -> torch.Tensor:
+        """Subtract each prompt group's mean, so the advantages are zero-mean."""
+        out = advantages.clone()
+        for prompt in dict.fromkeys(prompts):
+            idx = [i for i, p in enumerate(prompts) if p == prompt]
+            out[idx] = advantages[idx] - advantages[idx].mean()
+        return out
+
     def _compute_advantages(self, trajectory: TrajectoryBatch) -> TrajectoryBatch:
         raw_advantages = self.stat_tracker.update(trajectory.prompts, trajectory.rewards)
 
@@ -99,6 +108,15 @@ class DDRLTrainer(BaseDiffusionTrainer):
 
         if self.config.use_monotonic_transform:
             advantages = -torch.exp(-advantages)
+            # lambda(x) = -exp(-x) is increasing, so it preserves the ranking of
+            # advantages, but its range is (-inf, 0): every transformed advantage
+            # comes out negative. In the PPO term -A * ratio that makes every
+            # sampled action a discouraged one, so the policy walks away from its
+            # own distribution and collapses - and the unbounded side of the
+            # exponential makes it violent. Re-centering per prompt group
+            # restores the zero-mean advantage a policy-gradient estimator needs
+            # while keeping the transform's reweighting of the ranking.
+            advantages = self._recenter_per_group(advantages, trajectory.prompts)
 
         advantages = torch.clamp(advantages, -self.config.adv_clip_max, self.config.adv_clip_max)
         trajectory.advantages = advantages

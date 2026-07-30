@@ -91,8 +91,12 @@ class DiffusionDPOTrainer:
     def _training_step(self, batch: dict) -> dict[str, float]:
         """DiffusionDPO training step on a batch of preference pairs.
 
-        Loss: -log sigmoid(-beta * T * (loss_w - loss_w_ref - loss_l + loss_l_ref))
-        where loss = ||v_target - v_pred||^2 (denoising error).
+        Loss: -log sigmoid(-0.5 * beta * (model_diff - ref_diff)), where
+        model_diff = loss_w - loss_l under the policy, ref_diff is the same under
+        the frozen reference, and loss = ||v_target - v_pred||^2. The 0.5 and the
+        absence of an explicit T factor both match the reference implementation:
+        beta is expected to already absorb T, which is why its default is 5000
+        rather than an LLM-DPO-scale value.
         """
         device = self.device
         config = self.config
@@ -162,7 +166,7 @@ class DiffusionDPOTrainer:
         loss_l_model = (v_target_l.float() - v_pred_l.float()).pow(2).mean(dim=[1, 2, 3])
         loss_l_ref = (v_target_l.float() - v_ref_l.float()).pow(2).mean(dim=[1, 2, 3])
 
-        inside_sigmoid = -config.beta * ((loss_w_model - loss_w_ref) - (loss_l_model - loss_l_ref))
+        inside_sigmoid = -0.5 * config.beta * ((loss_w_model - loss_w_ref) - (loss_l_model - loss_l_ref))
         loss = -F.logsigmoid(inside_sigmoid).mean()
 
         return {

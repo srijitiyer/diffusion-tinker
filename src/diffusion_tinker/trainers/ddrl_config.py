@@ -21,7 +21,11 @@ class DDRLConfig(BaseDiffusionConfig):
 
     # Advantage computation
     beta_temp: float = 1.0  # temperature for advantage normalization
-    use_monotonic_transform: bool = False  # lambda(x) = -exp(-x) from Theorem 3.1; causes collapse without data anchor
+    # lambda(x) = -exp(-x) from Theorem 3.1: a risk-averse reweighting that
+    # penalizes low advantages far more than it rewards high ones. Its output is
+    # always negative, so it is re-centered per prompt group before use; without
+    # that the PPO term discourages every sampled action and the policy collapses.
+    use_monotonic_transform: bool = False
 
     # Timestep sampling for data loss
     timestep_sampling: str = "logit_normal"
