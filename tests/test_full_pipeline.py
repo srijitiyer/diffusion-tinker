@@ -177,6 +177,38 @@ def test_sde_step_at_sigma_one():
     print("  sde_step at sigma=1: OK")
 
 
+def test_trajectory_shuffled_indexing_alignment():
+    """Mini-batches are built from a shuffled permutation, so tensor fields and
+    list fields (prompts) must stay aligned. A silent misalignment here would
+    pair each trajectory with another sample's advantage, which trains fine and
+    learns nothing.
+    """
+    B, T = 6, 3
+    traj = TrajectoryBatch(
+        latents=torch.arange(B).float().reshape(B, 1, 1, 1, 1).expand(B, T, 2, 2, 2).clone(),
+        next_latents=torch.zeros(B, T, 2, 2, 2),
+        log_probs=torch.zeros(B, T),
+        timesteps=torch.linspace(1.0, 0.0, T + 1),
+        prompt_embeds=torch.arange(B).float().reshape(B, 1, 1).expand(B, 4, 8).clone(),
+        pooled_embeds=torch.arange(B).float().reshape(B, 1).expand(B, 8).clone(),
+        prompts=[f"p{i}" for i in range(B)],
+        rewards=torch.arange(B).float(),
+        advantages=torch.arange(B).float(),
+    )
+
+    perm = torch.tensor([4, 1, 5, 0, 3, 2])
+    mb = traj[perm]
+
+    for slot, src in enumerate(perm.tolist()):
+        assert mb.prompts[slot] == f"p{src}", f"prompt slot {slot} -> {mb.prompts[slot]}"
+        assert mb.advantages[slot].item() == src, "advantage misaligned with prompt"
+        assert mb.rewards[slot].item() == src, "reward misaligned with prompt"
+        assert mb.latents[slot].flatten()[0].item() == src, "latent misaligned with prompt"
+        assert mb.prompt_embeds[slot].flatten()[0].item() == src, "embeds misaligned"
+
+    print("  trajectory shuffled indexing: OK")
+
+
 def test_flow_matching_loss():
     """Test denoising loss computation (DDRL's data regularization term)."""
     B, C, H, W = 2, 4, 8, 8
