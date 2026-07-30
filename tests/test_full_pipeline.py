@@ -152,6 +152,31 @@ def test_sde_step():
     print("  sde_step: OK")
 
 
+def test_sde_step_at_sigma_one():
+    """The SD3/FLUX schedules start at sigma exactly 1.0, where
+    std_dev_t = sqrt(sigma/(1-sigma)) diverges. Unbounded, the first step
+    multiplied the latent by about -56 at noise_level=0.7, which wrecked every
+    rollout (reward went to 0 with no within-group spread, so no signal). The
+    step must stay contractive and must not flip sign.
+    """
+    B, C, H, W = 4, 4, 8, 8
+    sample = torch.randn(B, C, H, W)
+    sigma = torch.tensor([1.0] * B)
+    sigma_next = torch.tensor([0.9768] * B)
+
+    for noise_level in (0.1, 0.7, 1.0):
+        # isolate the coefficient on `sample` by zeroing the velocity
+        _, lp, mean = sde_step_with_logprob(
+            torch.zeros(B, C, H, W), sigma, sigma_next, sample, noise_level=noise_level
+        )
+        coeff = (mean / sample).mean().item()
+        assert 0.0 < coeff <= 1.0, f"noise={noise_level}: sample coeff {coeff} not in (0, 1]"
+        assert torch.isfinite(lp).all(), f"noise={noise_level}: non-finite log_prob"
+        assert mean.std() < 2.0 * sample.std(), f"noise={noise_level}: mean blew up"
+
+    print("  sde_step at sigma=1: OK")
+
+
 def test_flow_matching_loss():
     """Test denoising loss computation (DDRL's data regularization term)."""
     B, C, H, W = 2, 4, 8, 8

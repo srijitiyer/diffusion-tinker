@@ -39,6 +39,22 @@ class BaseDiffusionConfig:
     # trajectories per epoch. None = use all prompts every epoch.
     prompts_per_epoch: int | None = None
 
+    # Held-out prompts for evaluation. None = fall back to the first
+    # num_eval_prompts training prompts, which measures fit on the training set
+    # rather than generalization, so pass a real held-out list for any result
+    # you intend to report.
+    eval_prompts: list[str] | None = None
+    num_eval_prompts: int = 4
+    # Images per eval prompt. The eval mean is over num_eval_prompts *
+    # num_eval_samples_per_prompt images, so this is the main knob on how much
+    # sampling noise is left in the eval curve.
+    num_eval_samples_per_prompt: int = 1
+    # Eval draws its noise from a dedicated generator seeded with this, so every
+    # epoch evaluates on identical latents and the curve moves only when the
+    # policy moves. Without it eval shares the global RNG stream, which training
+    # advances by a different amount each epoch and which swamps the signal.
+    eval_seed: int = 1234
+
     # Sampling / rollout
     num_samples_per_prompt: int = 4
     num_inference_steps: int = 28

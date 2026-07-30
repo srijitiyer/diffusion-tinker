@@ -123,7 +123,29 @@ def flux_sample_with_logprob(
         else torch.zeros(prompt_embeds.shape[1], 3, device=device, dtype=dtype)
     )
 
-    pipeline.scheduler.set_timesteps(num_inference_steps, device=device)
+    # FLUX.1-dev's scheduler is configured with use_dynamic_shifting=True, which
+    # shifts the timestep schedule by a resolution-dependent mu and refuses to
+    # build a schedule without it. FLUX.1-schnell leaves it off, so passing no mu
+    # worked there and hid this on the only FLUX model we had run.
+    sched_kwargs = {}
+    if getattr(pipeline.scheduler.config, "use_dynamic_shifting", False):
+        sc = pipeline.scheduler.config
+        image_seq_len = latents.shape[1]
+        try:
+            from diffusers.pipelines.flux.pipeline_flux import calculate_shift
+            mu = calculate_shift(
+                image_seq_len,
+                sc.base_image_seq_len,
+                sc.max_image_seq_len,
+                sc.base_shift,
+                sc.max_shift,
+            )
+        except ImportError:
+            slope = (sc.max_shift - sc.base_shift) / (sc.max_image_seq_len - sc.base_image_seq_len)
+            mu = image_seq_len * slope + (sc.base_shift - slope * sc.base_image_seq_len)
+        sched_kwargs["mu"] = mu
+
+    pipeline.scheduler.set_timesteps(num_inference_steps, device=device, **sched_kwargs)
     sigmas = pipeline.scheduler.sigmas
 
     latents = latents * sigmas[0]

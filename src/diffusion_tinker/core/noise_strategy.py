@@ -40,6 +40,18 @@ def sde_step_with_logprob(
     sigma_clamped = sigma_bc.clamp(max=0.9999)
     std_dev_t = torch.sqrt(sigma_clamped / (1.0 - sigma_clamped)) * noise_level
 
+    # sqrt(sigma/(1-sigma)) diverges as sigma -> 1, and the SD3/FLUX schedules
+    # start at sigma exactly 1.0. The score term stays finite there, so the
+    # blow-up is purely the diffusion coefficient meeting a finite Euler step:
+    # unclamped, the first step multiplies the latent by about -56 at
+    # noise_level=0.7 (and by -0.16 at 0.1, so it also makes the noise_level
+    # sweep incomparable). Cap std_dev_t so |correction_coeff * dt| <= 1/2,
+    # which keeps the coefficient on `sample` in (0, 1] and leaves the SDE
+    # untouched wherever it is well conditioned - on the real schedules this
+    # binds only on the first step.
+    max_std_sq = sigma_bc.clamp(min=1e-8) / (-dt).clamp(min=1e-12)
+    std_dev_t = torch.minimum(std_dev_t, torch.sqrt(max_std_sq))
+
     correction_coeff = std_dev_t**2 / (2.0 * sigma_bc.clamp(min=1e-8))
     prev_sample_mean = sample * (1.0 + correction_coeff * dt) + model_output * dt * (
         1.0 + correction_coeff * (1.0 - sigma_bc)

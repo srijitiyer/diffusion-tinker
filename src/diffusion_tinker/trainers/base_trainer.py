@@ -334,33 +334,38 @@ class BaseDiffusionTrainer(ABC):
         self.transformer.eval()
         if self.config.offload_text_encoders:
             self._set_text_encoders_device(self.device)
-        eval_prompts = self.train_prompts[:4]
+        base_prompts = self.config.eval_prompts or self.train_prompts[: self.config.num_eval_prompts]
+        # Repeat each prompt so the mean is over more than one image per prompt.
+        eval_prompts = [p for p in base_prompts for _ in range(self.config.num_eval_samples_per_prompt)]
+
+        # Fresh generator each eval, seeded identically, so epoch N and epoch M
+        # start from the same latents and the curve reflects the policy only.
+        eval_gen = torch.Generator(device=self.device).manual_seed(self.config.eval_seed)
 
         if self._model_type == "flux":
-            from diffusion_tinker.models.flux_patch import flux_sample_with_logprob
-            output = flux_sample_with_logprob(
-                pipeline=self.pipeline,
-                prompts=eval_prompts,
-                num_inference_steps=self.config.num_eval_inference_steps,
-                guidance_scale=self.config.guidance_scale,
-                noise_level=0.0,
-                height=self.config.resolution,
-                width=self.config.resolution,
-            )
+            from diffusion_tinker.models.flux_patch import flux_sample_with_logprob as sample_fn
         else:
-            from diffusion_tinker.models.sd3_patch import sd3_sample_with_logprob
-            output = sd3_sample_with_logprob(
+            from diffusion_tinker.models.sd3_patch import sd3_sample_with_logprob as sample_fn
+
+        # A held-out eval set is far bigger than a rollout batch, so sample it in
+        # chunks rather than one call that would OOM on the VAE decode.
+        chunk = self.config.train_batch_size or len(eval_prompts)
+        eval_images = []
+        for i in range(0, len(eval_prompts), chunk):
+            out = sample_fn(
                 pipeline=self.pipeline,
-                prompts=eval_prompts,
+                prompts=eval_prompts[i : i + chunk],
                 num_inference_steps=self.config.num_eval_inference_steps,
                 guidance_scale=self.config.guidance_scale,
                 noise_level=0.0,
                 height=self.config.resolution,
                 width=self.config.resolution,
+                generator=eval_gen,
             )
+            eval_images.extend(out.images)
 
         ctx = RewardContext(
-            images=output.images, prompts=eval_prompts, device=self.device,
+            images=eval_images, prompts=eval_prompts, device=self.device,
             metadata=dict(self.reward_kwargs),
         )
         reward_output = self.reward_fn(ctx)
@@ -368,12 +373,12 @@ class BaseDiffusionTrainer(ABC):
         mean_reward = scores.mean().item()
         self._fire_callbacks("on_evaluate", epoch=epoch, mean_reward=mean_reward)
 
-        per_prompt = " | ".join(f"{p[:20]}={s:.2f}" for p, s in zip(eval_prompts, scores.tolist()))
-        print(f"Eval (epoch {epoch}): mean_reward={mean_reward:.3f} [{per_prompt}]")
+        sem = scores.std().item() / max(len(scores) ** 0.5, 1.0)
+        print(f"Eval (epoch {epoch}): mean_reward={mean_reward:.3f} +/- {sem:.3f} (n={len(scores)})")
 
         eval_dir = Path(self.config.output_dir) / f"eval-{epoch}"
         eval_dir.mkdir(parents=True, exist_ok=True)
-        for i, img in enumerate(output.images):
+        for i, img in enumerate(eval_images[:8]):
             img.save(eval_dir / f"sample_{i}.png")
 
         if mean_reward > self._best_eval_reward:
