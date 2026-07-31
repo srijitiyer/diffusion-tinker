@@ -74,17 +74,28 @@ class DRaFTTrainer:
         if not self.train_prompts:
             return
         uniq = list(dict.fromkeys(self.train_prompts))
+        # Encode in chunks. T5-XXL's attention is quadratic in sequence length and
+        # linear in batch, so encoding the whole prompt set at once is the peak
+        # allocation of the entire run, and it happens while the transformer is
+        # already resident. On a 16GB card that alone OOMs.
+        chunk = 4
         with torch.no_grad():
-            prompt_embeds, _, pooled_embeds, _ = self.pipeline.encode_prompt(
-                prompt=uniq,
-                prompt_2=None,
-                prompt_3=None,
-                negative_prompt=None,
-                do_classifier_free_guidance=False,
-                device=self.device,
-            )
-        for i, p in enumerate(uniq):
-            self._embed_cache[p] = (prompt_embeds[i].detach().cpu(), pooled_embeds[i].detach().cpu())
+            for start in range(0, len(uniq), chunk):
+                batch = uniq[start : start + chunk]
+                prompt_embeds, _, pooled_embeds, _ = self.pipeline.encode_prompt(
+                    prompt=batch,
+                    prompt_2=None,
+                    prompt_3=None,
+                    negative_prompt=None,
+                    do_classifier_free_guidance=False,
+                    device=self.device,
+                )
+                for i, p in enumerate(batch):
+                    self._embed_cache[p] = (
+                        prompt_embeds[i].detach().cpu(),
+                        pooled_embeds[i].detach().cpu(),
+                    )
+                del prompt_embeds, pooled_embeds
 
         for name in ["text_encoder", "text_encoder_2", "text_encoder_3"]:
             enc = getattr(self.pipeline, name, None)
