@@ -18,7 +18,7 @@ smoke tests. "Validated" = the intended objective actually moves in a real run.
 | FlowGRPO | **validated** | held-out OCR 0.300±0.064 (untrained) → 0.494 → 0.702 → 0.640 → 0.847 → 0.757 (ep2..ep10), n=44. Climbs with oscillation, no collapse through epoch 10. ratio 0.9977-0.9995 |
 | DDRL (β=0) | **validated** | held-out OCR → 0.569 at epoch 2, train reward 0.130→0.146→0.315, ratio 0.9986. Identical to FlowGRPO(β=0) by construction, see below |
 | DDPO | **validated** | held-out OCR → 0.568 at epoch 2, train reward 0.130→0.399→0.530, ratio 0.9953. Now uses its own buffered per-prompt estimator |
-| DDRL (anchor, transform off) | **climbing, matches the expected shape** | The canonical configuration. Held-out OCR against the 0.300 untrained baseline: beta=0.01 gives 0.457 (ep2) → 0.497 (ep4); beta=0.05 gives 0.530 → 0.653. Anchor active, ratio ~0.999. A gradual increase tracking FlowGRPO's level (0.494 → 0.702), which is the behaviour Haotian described for a small beta. Running |
+| DDRL (anchor, transform off) | **validated: gradual climb, no collapse** | The canonical configuration, eleven evals each against the 0.300 baseline. beta=0.01 reaches **0.815**, beta=0.05 reaches **0.860**. Both oscillate on the way up and neither collapses through epoch 20. Anchor active throughout, ratio ~0.999. This is the gradual increase at or above FlowGRPO's level that Haotian described for a small beta |
 | DDRL (anchor + monotonic transform) | **opt-in flag, off by default** | 0.300 → 0.482 → 0.893±0.036 → 0.892 → 0.873 → 0.851 (ep2..ep10), n=44, anchor active (`data_loss` ~0.268), ratio 0.9993. Climbs then holds past epoch 10, where the old collapse appeared. Kept as evidence the re-centering fix works, not as a headline result |
 | DRaFT | **validated (pre-audit)** | aesthetic 5.9→9.6. Has no importance ratio, so the SDE defect does not apply; the number stands but predates the eval fix |
 | SFT | **validated (pre-audit)** | flow-matching loss converges. Now also implemented for FLUX (was SD3-only) |
@@ -66,14 +66,14 @@ pre-audit DDPO number is a FlowGRPO number.**
 | Reward | Climbs? | Notes |
 |--------|---------|-------|
 | OCR | **yes, 0.300 → 0.702** | held-out, fixed seed, n=44; ~4.7σ at epoch 4 |
-| CLIP-score | **modest rise, oscillates** | 28.18 (untrained) → 28.24 → 28.50 → 28.94 → 28.40, n=24 held-out. I called this monotonic after four points; the fifth broke that. Net above baseline but the swing is comparable to the gain |
-| counting (OWLv2) | **climbs then reverts** | 0.561 → 0.673 (ep2) → 0.617 → 0.584 → 0.541. Peaks ~2σ above the untrained baseline then falls back to it. Run at noise 0.7, so the retracted "detection rewards need noise 0.1" claim is dead either way, but this is not a sustained gain and needs a gentler lr before it can be called a climb |
-| aesthetic (FlowGRPO) | marginal upward drift | 5.651 → 5.684 → 5.667 → 5.739 → 5.751 |
-| aesthetic (DRaFT) | **yes 5.9→9.6 (pre-audit)** | re-run OOMs a 24GB A5000 even at truncation 1, group 1; DRaFT holds activations for every backpropagated step. Requeued smaller |
-| PickScore | **no, flat through epoch 12** | seven evals, 22.85 to 23.05, all within one SEM (0.23) of the 23.03 untrained baseline. Run retired as conclusive |
-| hps_v2 | **no, flat** | 0.297 → 0.295 → 0.293 → 0.295 → 0.296 across five evals |
+| aesthetic (FlowGRPO) | **yes, 5.651 → 6.063** | eleven evals, near-monotonic. The pre-audit note called this flat and blamed RL being weak on a smooth reward. That was the zero-signal rollouts, not the reward |
+| counting (OWLv2) | **yes, 0.561 → 0.679** | at lr 1e-4 it dips to 0.522 around epoch 10 before recovering. At lr 3e-5 it climbs smoothly instead: 0.561 → 0.589 → 0.631 → 0.638 → 0.642, no dip. Run at noise 0.7 throughout |
+| CLIP-score | **modest rise, oscillates** | 28.18 (untrained) → peak 28.94 → settles ~28.7. Net above baseline but the swing is comparable to the gain |
+| PickScore | **no, flat through epoch 12** | seven evals, 22.85 to 23.05, all within one SEM (0.23) of the 23.03 baseline. Retired as conclusive |
+| hps_v2 | **no, flat** | eleven evals, 0.293 to 0.302 against a 0.297 baseline. A drift of 0.004 over the whole run is not a climb |
+| aesthetic (DRaFT) | **pending** | OOMs a 24GB A5000 even at truncation 1, group 1 (23.19 GB in use): DRaFT holds activations for every backpropagated step. Requeued on the 48GB node |
 
-**The headroom thesis survives, and my retraction of it was too broad.** The
+**The headroom thesis survives in its sharper form, and both my retraction and the original wording were partly wrong.** The
 original claim was that RL raises a reward when the task has headroom and stays
 flat when the base model is already near the reward's ceiling. I retracted the
 "flat" half during the audit, on the grounds that those runs had zero-signal
@@ -83,10 +83,15 @@ was not: re-run on fixed code with rollouts that demonstrably carry signal
 seven evals and HPS across four, while OCR and CLIP-score climb clearly. So the
 ceiling explanation now stands on evidence rather than on an artifact.
 
-Counting is the one that got more complicated rather than less. It climbs to
-~2σ above baseline by epoch 2 and then decays back to it, which is not the clean
-0.79 → 1.0 the pre-audit note claimed. Worth a gentler learning rate before
-reporting it either way.
+Two corrections to my own earlier readings here. Counting does not decay below
+baseline; it dips around epoch 10 at lr 1e-4 and then recovers to 0.679, and at
+lr 3e-5 it climbs smoothly with no dip at all, so the dip was an lr artifact
+rather than a property of the reward. And aesthetic under FlowGRPO climbs
+(5.651 → 6.063 over eleven evals), which contradicts the long-standing claim that
+FlowGRPO is too weak for a smooth reward and only DRaFT works on it. What the
+sharper thesis says is that a reward moves when the base model has headroom on
+it, and that the two preference models (PickScore, HPS) are the ones genuinely at
+their ceiling, not smooth rewards as a class.
 
 ## Models
 
