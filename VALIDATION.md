@@ -21,8 +21,8 @@ smoke tests. "Validated" = the intended objective actually moves in a real run.
 | DDRL (anchor, transform off) | **validated: gradual climb, no collapse** | The canonical configuration, eleven evals each against the 0.300 baseline. beta=0.01 reaches **0.815**, beta=0.05 reaches **0.860**. Both oscillate on the way up and neither collapses through epoch 20. Anchor active throughout, ratio ~0.999. This is the gradual increase at or above FlowGRPO's level that Haotian described for a small beta |
 | DDRL (anchor + monotonic transform) | **opt-in flag, off by default** | 0.300 → 0.482 → 0.893±0.036 → 0.892 → 0.873 → 0.851 (ep2..ep10), n=44, anchor active (`data_loss` ~0.268), ratio 0.9993. Climbs then holds past epoch 10, where the old collapse appeared. Kept as evidence the re-centering fix works, not as a headline result |
 | DRaFT | **validated on a held-out set for the first time** | 5.440 → 5.718 across 13 evals. The pre-audit 5.9→9.6 was **train** reward: DRaFTTrainer does not inherit BaseDiffusionTrainer, so it never called _evaluate and only ever reported the reward it directly optimizes on the prompts it optimizes. It now has a matching held-out eval |
-| SFT | **validated (pre-audit)** | flow-matching loss converges. Now also implemented for FLUX (was SD3-only) |
-| DiffusionDPO | **pending** | re-run blocked by Pick-a-Pic HF gating. Also had a missing 0.5 factor, so any prior run was at twice the intended beta |
+| SFT | **validated on held-out data** | flow-matching loss on 16 examples the trainer never sees, fixed noise and fixed timesteps: 0.21184 → 0.2019 and still falling, monotonic. The pre-audit note only said the training loss converges, which a denoising objective will do by construction |
+| DiffusionDPO | **running** | the blocker was not HF gating: yuvalkirstain/pickapic_v1 and v2 both 404 now, so accepting terms would not have helped. `kashif/pickascore` is an ungated mirror with the same schema. Two real defects also had to be fixed first: the missing 0.5 in the loss (paper beta=5000 was behaving like 10000), and PreferenceDataset assuming PIL images where Pick-a-Pic stores raw jpeg bytes |
 
 **FlowGRPO(β=0) ≡ DDRL(β=0).** Not approximately: the base advantage clamps the
 group-normalized reward to ±5, and DDRL's reduces to exactly that when
@@ -110,7 +110,7 @@ unpacked latents, `timestep = sigma*1000`). Fixed and shape-verified.
 - **FLUX.1-dev feasibility** (does 12B + LoRA fit and train on one 48GB card) is
   the main open question. Only atlas29 has 48GB cards; at least one is wedged, and
   the node reads /atlas at 4.7 MB/s, so each attempt costs ~2h of model loading.
-- **DiffusionDPO re-run** needs Pick-a-Pic terms accepted on HF.
+- **DiffusionDPO** is running on an ungated mirror; no account action is needed after all.
 - Several reward rows above need re-measuring on fixed code; they are marked.
 - Deliberate deviations, not bugs: the log-prob is mean-reduced rather than
   summed (which is what makes `clip_range=1e-3` sane), `torch.std` is
