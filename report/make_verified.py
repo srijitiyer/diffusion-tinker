@@ -28,7 +28,8 @@ ALGOS = [
 ]
 # tag, label, colour, untrained baseline (measured at epoch 0 by the run itself)
 REWARDS = [
-    ("r_aes", "aesthetic", "#1b6ca8", None),
+    ("r_aes", "aesthetic (FlowGRPO)", "#1b6ca8", None),
+    ("r_draft_ev2", "aesthetic (DRaFT)", "#3d9970", None),
     ("r_count_lo", "counting (lr 3e-5)", "#5c7457", None),
     ("r_clip", "CLIP-score", "#e0a458", None),
     ("r_pick", "PickScore", "#c8553d", None),
