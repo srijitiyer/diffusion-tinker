@@ -11,6 +11,33 @@ from PIL import Image
 from torch.utils.data import Dataset
 
 
+def _as_image(value) -> Image.Image:
+    """Coerce a dataset image column into a PIL image.
+
+    Pick-a-Pic and its mirrors store jpg_0/jpg_1 as raw encoded bytes rather than
+    as a decoded image feature, so a loader that assumes PIL fails with
+    'bytes' object has no attribute 'mode'. Paths and file objects show up in
+    local imagefolder datasets.
+    """
+    if isinstance(value, Image.Image):
+        return value
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        import io
+
+        return Image.open(io.BytesIO(bytes(value)))
+    if isinstance(value, str):
+        return Image.open(value)
+    if isinstance(value, dict):
+        # datasets sometimes hands back {"bytes": ..., "path": ...}
+        if value.get("bytes") is not None:
+            import io
+
+            return Image.open(io.BytesIO(value["bytes"]))
+        if value.get("path"):
+            return Image.open(value["path"])
+    raise TypeError(f"cannot read an image from {type(value).__name__}")
+
+
 class PreferenceDataset(Dataset):
     """Dataset of (prompt, winner_image, loser_image) triplets."""
 
@@ -54,10 +81,8 @@ class PreferenceDataset(Dataset):
             except (TypeError, ValueError):
                 pass  # Non-numeric label, assume default ordering
 
-        if isinstance(winner_img, str):
-            winner_img = Image.open(winner_img)
-        if isinstance(loser_img, str):
-            loser_img = Image.open(loser_img)
+        winner_img = _as_image(winner_img)
+        loser_img = _as_image(loser_img)
 
         if winner_img.mode != "RGB":
             winner_img = winner_img.convert("RGB")
