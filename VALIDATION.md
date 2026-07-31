@@ -20,7 +20,7 @@ smoke tests. "Validated" = the intended objective actually moves in a real run.
 | DDPO | **validated** | held-out OCR → 0.568 at epoch 2, train reward 0.130→0.399→0.530, ratio 0.9953. Now uses its own buffered per-prompt estimator |
 | DDRL (anchor, transform off) | **validated: gradual climb, no collapse** | The canonical configuration, eleven evals each against the 0.300 baseline. beta=0.01 reaches **0.815**, beta=0.05 reaches **0.860**. Both oscillate on the way up and neither collapses through epoch 20. Anchor active throughout, ratio ~0.999. This is the gradual increase at or above FlowGRPO's level that Haotian described for a small beta |
 | DDRL (anchor + monotonic transform) | **opt-in flag, off by default** | 0.300 → 0.482 → 0.893±0.036 → 0.892 → 0.873 → 0.851 (ep2..ep10), n=44, anchor active (`data_loss` ~0.268), ratio 0.9993. Climbs then holds past epoch 10, where the old collapse appeared. Kept as evidence the re-centering fix works, not as a headline result |
-| DRaFT | **validated (pre-audit)** | aesthetic 5.9→9.6. Has no importance ratio, so the SDE defect does not apply; the number stands but predates the eval fix |
+| DRaFT | **validated on a held-out set for the first time** | 5.440 → 5.718 across 13 evals. The pre-audit 5.9→9.6 was **train** reward: DRaFTTrainer does not inherit BaseDiffusionTrainer, so it never called _evaluate and only ever reported the reward it directly optimizes on the prompts it optimizes. It now has a matching held-out eval |
 | SFT | **validated (pre-audit)** | flow-matching loss converges. Now also implemented for FLUX (was SD3-only) |
 | DiffusionDPO | **pending** | re-run blocked by Pick-a-Pic HF gating. Also had a missing 0.5 factor, so any prior run was at twice the intended beta |
 
@@ -71,7 +71,7 @@ pre-audit DDPO number is a FlowGRPO number.**
 | CLIP-score | **modest rise, oscillates** | 28.18 (untrained) → peak 28.94 → settles ~28.7. Net above baseline but the swing is comparable to the gain |
 | PickScore | **no, flat through epoch 12** | seven evals, 22.85 to 23.05, all within one SEM (0.23) of the 23.03 baseline. Retired as conclusive |
 | hps_v2 | **no, flat** | eleven evals, 0.293 to 0.302 against a 0.297 baseline. A drift of 0.004 over the whole run is not a climb |
-| aesthetic (DRaFT) | **pending** | OOMs a 24GB A5000 even at truncation 1, group 1 (23.19 GB in use): DRaFT holds activations for every backpropagated step. Requeued on the 48GB node |
+| aesthetic (DRaFT) | **yes, 5.440 → 5.718 held-out** | 13 evals, near-monotonic, n=24 at 256px. Peak memory 17.7 GB after the text-encoder fix, having previously OOMed at 23.19 GB on the same card. Note 256px, so not directly comparable to the 512px FlowGRPO aesthetic run |
 
 **The headroom thesis survives in its sharper form, and both my retraction and the original wording were partly wrong.** The
 original claim was that RL raises a reward when the task has headroom and stays
