@@ -70,6 +70,21 @@ class SFTTrainer:
 
     def _setup_model(self, model_id: str):
         from diffusion_tinker.models.model_setup import setup_sd3_model
+        # SFTTrainer does not inherit BaseDiffusionTrainer, so it has no
+        # _model_type of its own; the flow-matching loss needs one to pick the
+        # SD3 or FLUX transformer signature. Only the SD3 path is wired up here,
+        # so say so rather than silently mislabelling a FLUX model as sd3.
+        if self.config.model_type == "auto":
+            self._model_type = "flux" if "flux" in model_id.lower() else "sd3"
+        else:
+            self._model_type = self.config.model_type
+        if self._model_type == "flux":
+            raise NotImplementedError(
+                "SFT is wired for SD3 only: _setup_model calls setup_sd3_model. "
+                "compute_flow_matching_loss has a FLUX branch, but the pipeline and "
+                "latent packing here do not, so a FLUX model would train on the "
+                "wrong tensor layout rather than fail."
+            )
         self.pipeline, self.transformer, self.vae, self.model_config = setup_sd3_model(
             model_id, self.config, self.device
         )
