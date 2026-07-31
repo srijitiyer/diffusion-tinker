@@ -354,18 +354,30 @@ class BaseDiffusionTrainer(ABC):
         # chunks rather than one call that would OOM on the VAE decode.
         chunk = self.config.train_batch_size or len(eval_prompts)
         eval_images = []
-        for i in range(0, len(eval_prompts), chunk):
-            out = sample_fn(
-                pipeline=self.pipeline,
-                prompts=eval_prompts[i : i + chunk],
-                num_inference_steps=self.config.num_eval_inference_steps,
-                guidance_scale=self.config.guidance_scale,
-                noise_level=0.0,
-                height=self.config.resolution,
-                width=self.config.resolution,
-                generator=eval_gen,
-            )
-            eval_images.extend(out.images)
+        try:
+            for i in range(0, len(eval_prompts), chunk):
+                out = sample_fn(
+                    pipeline=self.pipeline,
+                    prompts=eval_prompts[i : i + chunk],
+                    num_inference_steps=self.config.num_eval_inference_steps,
+                    guidance_scale=self.config.guidance_scale,
+                    noise_level=0.0,
+                    height=self.config.resolution,
+                    width=self.config.resolution,
+                    generator=eval_gen,
+                )
+                eval_images.extend(out.images)
+        finally:
+            # Put the text encoders back on CPU. Eval pulls them onto the GPU to
+            # encode its prompts and used to leave them there, so T5-XXL's ~9GB
+            # stayed resident for the rest of training. DRaFT is the case that
+            # breaks first: it offloads them on purpose after caching embeddings,
+            # precisely to free room for the reward backward, and a single eval
+            # silently undid that and OOMed the next step.
+            if self.config.offload_text_encoders:
+                self._set_text_encoders_device("cpu")
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
         ctx = RewardContext(
             images=eval_images, prompts=eval_prompts, device=self.device,
