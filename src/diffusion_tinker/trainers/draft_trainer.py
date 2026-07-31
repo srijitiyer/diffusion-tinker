@@ -237,6 +237,66 @@ class DRaFTTrainer:
         )
         return self.reward_fn._compute(ctx).scores.to(self.device)
 
+    def _evaluate(self, epoch: int) -> float:
+        """Held-out eval matching the other trainers.
+
+        DRaFTTrainer does not inherit BaseDiffusionTrainer, so it had no eval at
+        all and reported only the training reward, which is the quantity it
+        directly optimizes on the prompts it optimizes. Same held-out set, same
+        fixed generator and same chunking as the base implementation, so the
+        curves are comparable.
+        """
+        from diffusion_tinker.models.sd3_patch import sd3_sample_with_logprob
+
+        config = self.config
+        base_prompts = config.eval_prompts or self.train_prompts[: config.num_eval_prompts]
+        eval_prompts = [p for p in base_prompts for _ in range(config.num_eval_samples_per_prompt)]
+
+        self.transformer.eval()
+        # sampling encodes the prompts, so the encoders have to come back for it
+        for name in ["text_encoder", "text_encoder_2", "text_encoder_3"]:
+            enc = getattr(self.pipeline, name, None)
+            if enc is not None:
+                enc.to(self.device)
+
+        gen = torch.Generator(device=self.device).manual_seed(config.eval_seed)
+        chunk = max(1, config.gradient_accumulation_steps)
+        images = []
+        try:
+            with torch.no_grad():
+                for i in range(0, len(eval_prompts), chunk):
+                    out = sd3_sample_with_logprob(
+                        pipeline=self.pipeline,
+                        prompts=eval_prompts[i : i + chunk],
+                        num_inference_steps=config.num_eval_inference_steps,
+                        guidance_scale=config.guidance_scale,
+                        noise_level=0.0,
+                        height=config.resolution,
+                        width=config.resolution,
+                        generator=gen,
+                    )
+                    images.extend(out.images)
+        finally:
+            # back to CPU: DRaFT offloads them on purpose to leave room for the
+            # reward backward, and leaving them resident OOMs the next step
+            for name in ["text_encoder", "text_encoder_2", "text_encoder_3"]:
+                enc = getattr(self.pipeline, name, None)
+                if enc is not None:
+                    enc.to("cpu")
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        ctx = RewardContext(images=images, prompts=eval_prompts, device=self.device,
+                            metadata=dict(self.reward_kwargs))
+        scores = self.reward_fn(ctx).scores
+        mean_reward = scores.mean().item()
+        sem = scores.std().item() / max(len(scores) ** 0.5, 1.0)
+        print(f"Eval (epoch {epoch}): mean_reward={mean_reward:.3f} +/- {sem:.3f} (n={len(scores)})", flush=True)
+
+        self._fire_callbacks("on_evaluate", epoch=epoch, mean_reward=mean_reward)
+        self.transformer.train()
+        return mean_reward
+
     def _fire_callbacks(self, method: str, **kwargs):
         for cb in self.callbacks:
             getattr(cb, method)(self, **kwargs)
