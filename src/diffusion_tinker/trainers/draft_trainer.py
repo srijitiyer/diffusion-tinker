@@ -255,6 +255,15 @@ class DRaFTTrainer:
         for epoch in range(config.num_epochs):
             self._fire_callbacks("on_epoch_begin", epoch=epoch)
 
+            # DRaFT has its own loop, so it never called _evaluate and reported
+            # only the training reward. That is the reward it is directly
+            # optimizing on the prompts it is optimizing, which says nothing about
+            # generalization and is not comparable to the other trainers' curves.
+            # Evaluate here, before the update, on the same held-out set at the
+            # same fixed seed as everything else.
+            if epoch % config.eval_every == 0:
+                self._evaluate(epoch)
+
             epoch_prompts = self.train_prompts.copy()
             random.shuffle(epoch_prompts)
 
