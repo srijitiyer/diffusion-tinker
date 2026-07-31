@@ -100,7 +100,7 @@ DDRL + transform      & $0.502 \to 0.658 \to 0.787$ & $0.482 \to \mathbf{0.893} 
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.92\textwidth]{figures/verified_curves.pdf}
-\caption{Held-out OCR against the untrained baseline (dashed, with its standard error shaded). Both runs climb well clear of it and neither collapses through the end of its run. The two diamonds are runs retired once their audit point was made: DDRL($\beta{=}0$) after it matched FlowGRPO($\beta{=}0$) exactly at epoch 0, and DDPO after its buffered estimator was shown to produce non-zero mean advantage.}
+\caption{Left: held-out OCR against the untrained baseline (dashed, standard error shaded). Canonical DDRL, meaning an anchor with the monotonic transform off, climbs to $0.88$ at $\beta{=}0.05$ and $0.82$ at $\beta{=}0.01$, oscillating on the way up and not collapsing. Right: each reward relative to its own untrained value, so scales as different as counting accuracy, PickScore and aesthetic share an axis. Counting and aesthetic separate clearly from zero; CLIP-score barely; PickScore and HPS do not move at all, which is what a reward at its ceiling looks like.}
 \label{fig:verified}
 \end{figure}
 
