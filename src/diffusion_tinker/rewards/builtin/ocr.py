@@ -144,3 +144,32 @@ class OCRReward(BaseReward):
             scores.append(score)
 
         return RewardOutput(scores=torch.tensor(scores, dtype=torch.float32))
+
+
+@register_reward("ocr_exact")
+class OCRExactReward(OCRReward):
+    """OCR reward scored by exact match rather than edit distance.
+
+    The default reward normalizes edit distance by target length, which makes
+    longer targets *more* forgiving: one wrong character costs 1/3 on "CAT" but
+    1/13 on "PURPLE ORCHID". That is why using harder prompts to create headroom
+    does not work - FLUX.1-dev scores 0.792 on short words and still 0.691 on
+    two-word phrases, because partial credit absorbs the extra difficulty.
+
+    Exact match removes the partial credit, so the score reflects whether the
+    model actually rendered the string. Sparse, but sparse is what leaves room to
+    climb on a model that is already good at text.
+    """
+
+    name = "ocr_exact"
+
+    def _score_single(self, image, target: str) -> float:
+        if not target:
+            return 0.0
+        recognized = self._ocr_image(image)
+        recognized_norm = recognized.replace(" ", "").lower()
+        target_norm = target.replace(" ", "").lower()
+        if not target_norm:
+            return 0.0
+        return 1.0 if target_norm in recognized_norm else 0.0
+
