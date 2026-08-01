@@ -168,6 +168,23 @@ Falls then flattens, which is the shape the run-script callback showed
 dataset tail with an even spread of sigmas rather than whatever the callback
 sampled, so the two are not comparable in level - only in behaviour.
 
+**DiffusionDPO gains little or nothing on held-out preference**, now that it can
+be measured. Accuracy over 11 evals: 0.500, 0.550, 0.580, 0.610, 0.530, 0.590,
+0.580, 0.520, 0.520, 0.510, 0.540 - a peak of 0.610 at step 600, then a drift back
+to 0.540, mean 0.553 against chance 0.500.
+
+The tempting summary is "mean 0.553 with a standard error of 0.016 over ten
+points, so clearly above chance". That is wrong. The 100 held-out pairs and the
+noise draws are *fixed across evals* - deliberately, so the curve moves only when
+the model does. Repeated evals therefore do not resample the pairs, and the
+binomial error from having only 100 of them does not average down. The right
+uncertainty is 0.05, so the peak is ~2 SE above chance and the mean ~1 SE.
+Suggestive, not established.
+
+That is consistent with what the training logs already showed: the loser's loss
+rises far more reliably than the winner's falls, so the objective separates the
+pair mainly by pushing one side down.
+
 **Baselines are only comparable within a GPU model.** `h_ddpo` on an a5000 starts
 at 0.499 +/- 0.073 where the atlas29 a6000-Ada arms start at 0.541, same seed and
 same held-out prompts. That is within one SEM, but the four same-node arms agreed
@@ -180,13 +197,13 @@ kernels differing by architecture. Arms must therefore stay on one node type.
 `report/beta_csv/`). Longest surviving run per arm, since atlas29 killed and
 restarted several of them:
 
-| arm | n | epoch 0 | mean of the rest | best |
-|---|---|---|---|---|
-| `hb0` data_beta 0 (= FlowGRPO) | 9 | 0.541 | 0.575 | 0.621 |
-| `hb001` 0.01 | 6 | 0.541 | 0.564 | 0.596 |
-| `hb005` 0.05 | 6 | 0.541 | 0.546 | 0.565 |
-| `hb03` 0.3 | 10 | 0.541 | 0.557 | 0.594 |
-| `hk001` FlowGRPO reverse-KL 0.01 | 3 | 0.541 | 0.523 | 0.541 |
+| arm | n | epoch 0 | mean of the rest | best | last 5 |
+|---|---|---|---|---|---|
+| `hb0` data_beta 0 (= FlowGRPO) | 9 | 0.541 | 0.575 | 0.621 | 0.586 |
+| `hb001` 0.01 | 6 | 0.541 | 0.564 | 0.596 | 0.564 |
+| `hb005` 0.05 | 10 | 0.541 | 0.546 | 0.565 | 0.544 |
+| `hb03` 0.3 | 13 | 0.541 | 0.560 | 0.594 | 0.567 |
+| `hk001` FlowGRPO reverse-KL 0.01 | 5 | 0.541 | 0.540 | 0.560 | 0.540 |
 
 **Every point of every arm lies inside +/-1 SEM of the untrained baseline.** The
 spread between arm means is 0.029 (0.546 to 0.575, excluding `hk001`), while the
@@ -195,7 +212,9 @@ between-arm differences are the same size as the noise on each arm, so no arm ca
 be ranked against another and none is distinguishable from doing nothing.
 
 The figure is drawn with the SEM band shaded for that reason: the arms only span
-0.51-0.62, so autoscaling to the data makes noise look like structure.
+0.51-0.62, so autoscaling to the data makes noise look like structure. Extending
+the longest arm to 13 points did not change any of this - its last five average
+0.567, still inside the band.
 
 What this does **not** say. It does not say the anchor is useless - its job is to
 stop drift over long training, and ten epochs is early for drift to appear. It
