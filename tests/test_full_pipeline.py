@@ -277,6 +277,96 @@ def test_ddrl_advantages():
     print("  ddrl_advantages: OK")
 
 
+def test_ddrl_monotonic_transform_recentered():
+    """The transform is applied through DDRLTrainer._compute_advantages, which
+    re-centers it. Without the re-centering every advantage is negative (the
+    range of -exp(-x) is (-inf, 0)), so -A * ratio pushes the policy away from
+    every action it sampled and the run collapses. That was the bug behind the
+    old "DDRL diverges" result, so pin both halves: zero-mean per group, and
+    ranking preserved.
+    """
+    from diffusion_tinker.trainers.ddrl_trainer import DDRLTrainer
+
+    prompts = ["a"] * 4 + ["b"] * 4
+    rewards = torch.tensor([5.0, 3.0, 4.0, 6.0, 2.0, 8.0, 5.0, 5.0])
+    raw = PerPromptStatTracker().update(prompts, rewards)
+
+    transformed = -torch.exp(-raw)
+    assert (transformed < 0).all(), "sanity: the raw transform is all-negative"
+
+    centered = DDRLTrainer._recenter_per_group(transformed, prompts)
+    for group in (slice(0, 4), slice(4, 8)):
+        assert abs(centered[group].mean().item()) < 1e-5, f"group not zero-mean: {centered[group]}"
+        # a real policy-gradient estimator needs both signs present
+        assert (centered[group] > 0).any() and (centered[group] < 0).any()
+        # lambda is increasing, so it must not reorder the group
+        order_raw = torch.argsort(raw[group])
+        order_new = torch.argsort(centered[group])
+        assert torch.equal(order_raw, order_new), "transform changed the ranking"
+
+    print("  ddrl monotonic transform re-centered: OK")
+
+
+def test_buffered_tracker_differs_from_grpo():
+    """DDPO normalizes against a rolling per-prompt history; GRPO normalizes
+    within the batch. The tell is that GRPO's advantages are exactly zero-mean
+    per group by construction and DDPO's are not, once the buffer has filled.
+    DDPO silently inheriting the GRPO tracker is what made every pre-audit DDPO
+    number a FlowGRPO number, so it is worth a test rather than a comment.
+    """
+    from diffusion_tinker.core.stat_tracking import BufferedPerPromptStatTracker
+
+    buffered = BufferedPerPromptStatTracker(buffer_size=32, min_count=4)
+    grpo = PerPromptStatTracker()
+
+    torch.manual_seed(0)
+    prompts = ["a"] * 4 + ["b"] * 4
+    # feed a few batches so the per-prompt buffers pass min_count
+    for _ in range(3):
+        r = torch.rand(8) * 4.0
+        adv_b = buffered.update(prompts, r)
+        adv_g = grpo.update(prompts, r)
+
+    # last batch: shift prompt "a" well above its own history
+    r = torch.cat([torch.full((4,), 8.0), torch.rand(4) * 4.0])
+    adv_b = buffered.update(prompts, r)
+    adv_g = grpo.update(prompts, r)
+
+    assert abs(adv_g[:4].mean().item()) < 1e-5, "GRPO group should be exactly centered"
+    assert adv_b[:4].mean().item() > 0.5, (
+        f"a batch far above the prompt's history should get positive advantage, got {adv_b[:4].mean()}"
+    )
+    assert torch.isfinite(adv_b).all()
+
+    # a single sample of an unseen prompt must not divide by a zero-size history
+    solo = BufferedPerPromptStatTracker()
+    assert torch.isfinite(solo.update(["new"], torch.tensor([1.0]))).all()
+
+    print("  buffered tracker differs from grpo: OK")
+
+
+def test_kl_variance_finite_at_sigma_one():
+    """The KL anchor divides by the sampler's step variance. If it used the
+    uncapped std_dev_t it would divide by a variance ~1e4 too large at sigma=1
+    and the penalty would silently vanish on the first step - the run looks
+    regularized and is not. Both trainers must use sde_diffusion_std.
+    """
+    from diffusion_tinker.core.noise_strategy import sde_diffusion_std
+
+    sigma = torch.tensor([1.0, 0.9, 0.5])
+    sigma_next = torch.tensor([0.9768, 0.85, 0.45])
+
+    for noise_level in (0.1, 0.7, 1.0):
+        std = sde_diffusion_std(sigma, sigma_next, noise_level)
+        noise_std = std * torch.sqrt((sigma - sigma_next).clamp(min=1e-12))
+        assert torch.isfinite(noise_std).all(), f"noise={noise_level}: non-finite"
+        assert (noise_std > 0).all(), f"noise={noise_level}: zero variance divides by ~0"
+        # unbounded, sqrt(1/(1-1)) is inf at sigma=1; the cap must bite there
+        assert noise_std[0] < 5.0, f"noise={noise_level}: sigma=1 std {noise_std[0]} still blowing up"
+
+    print("  kl variance finite at sigma=1: OK")
+
+
 def test_reward_resolve():
     """Test reward registry and resolution."""
     # String resolution
