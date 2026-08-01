@@ -70,15 +70,21 @@ def _unpack_latents(latents, height, width, channels=16):
 
 
 def _prepare_img_ids(batch_size, height, width, device, dtype):
-    """Create image position IDs for FLUX's 3D rotary embeddings."""
+    """Create image position IDs for FLUX's 3D rotary embeddings.
+
+    Returns (tokens, 3), not (batch, tokens, 3). These ids depend only on the
+    resolution, so they are identical for every sample in the batch, and diffusers
+    deprecated the batched form: passing it emits a warning on every forward,
+    which floods the log at one line per transformer call, and it will stop being
+    accepted. Shared across the batch like txt_ids, so it is not indexed when a
+    trajectory is sliced.
+    """
     h = height // 16  # VAE (8x) * packing (2x) = 16x
     w = width // 16
     img_ids = torch.zeros(h, w, 3, device=device, dtype=dtype)
     img_ids[..., 1] = torch.arange(h, device=device, dtype=dtype)[:, None]
     img_ids[..., 2] = torch.arange(w, device=device, dtype=dtype)[None, :]
-    img_ids = img_ids.reshape(h * w, 3)
-    img_ids = img_ids.unsqueeze(0).expand(batch_size, -1, -1)
-    return img_ids
+    return img_ids.reshape(h * w, 3)
 
 
 @torch.no_grad()
