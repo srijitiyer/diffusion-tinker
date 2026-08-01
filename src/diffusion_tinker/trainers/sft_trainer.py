@@ -108,6 +108,17 @@ class SFTTrainer:
                     f"Set image_column/caption_column in config."
                 )
 
+        self.holdout_rows = None
+        if self.config.holdout_size > 0:
+            n = self.config.holdout_size
+            if n >= len(hf_ds):
+                raise ValueError(f"holdout_size {n} leaves no training data ({len(hf_ds)} examples).")
+            # take the tail, so the held-out examples are the same ones on every
+            # run of the same dataset regardless of the shuffle seed
+            self.holdout_rows = hf_ds.select(range(len(hf_ds) - n, len(hf_ds)))
+            hf_ds = hf_ds.select(range(len(hf_ds) - n))
+            print(f"Holding out {n} examples; training on {len(hf_ds)}")
+
         ds = _SFTDataset(hf_ds, self.config.image_column, self.config.caption_column, self.config.resolution)
         self.dataloader = DataLoader(
             ds,
@@ -161,6 +172,65 @@ class SFTTrainer:
 
         return {"loss": loss.item()}, loss
 
+    def _prepare_holdout(self):
+        """Encode the held-out batch once, with fixed noise and timesteps.
+
+        The flow-matching loss is an expectation over (t, noise), so re-drawing
+        them each eval would move the number by more than training does. Pinning
+        both means a change in the reported loss is a change in the model.
+        """
+        cfg = self.config
+        ds = _SFTDataset(self.holdout_rows, cfg.image_column, cfg.caption_column, cfg.resolution)
+        batch = _sft_collate([ds[i] for i in range(len(ds))])
+
+        with torch.no_grad():
+            latents = encode_to_latents(self.vae, batch["images"].to(self.device, dtype=self.vae.dtype))
+            prompt_embeds, _, pooled, _ = self.pipeline.encode_prompt(
+                prompt=batch["captions"], prompt_2=None, prompt_3=None,
+                negative_prompt=None, do_classifier_free_guidance=False, device=self.device,
+            )
+
+        n = latents.shape[0]
+        gen = torch.Generator(device="cpu").manual_seed(cfg.eval_seed)
+        # an even spread over the schedule rather than a logit-normal draw, so the
+        # held-out loss is not dominated by wherever the sample happened to land
+        sigmas = torch.linspace(0.05, 0.95, n).to(self.device)
+        noise = torch.randn(latents.shape, generator=gen).to(self.device, dtype=latents.dtype)
+
+        self._holdout = {
+            "latents": latents, "noise": noise, "sigmas": sigmas,
+            "prompt_embeds": prompt_embeds, "pooled": pooled,
+        }
+
+    @torch.no_grad()
+    def _evaluate(self, step: int) -> float | None:
+        if self.holdout_rows is None:
+            return None
+        if getattr(self, "_holdout", None) is None:
+            self._prepare_holdout()
+
+        b = self._holdout
+        autocast_dtype = torch.bfloat16 if self.config.mixed_precision == "bf16" else torch.float16
+        was_training = self.transformer.training
+        self.transformer.eval()
+        try:
+            with torch.autocast(device_type=self.device.type, dtype=autocast_dtype, cache_enabled=False):
+                loss = compute_flow_matching_loss(
+                    transformer=self.transformer,
+                    latents=b["latents"], noise=b["noise"], sigmas=b["sigmas"],
+                    prompt_embeds=b["prompt_embeds"], pooled_embeds=b["pooled"],
+                    model_type=self._model_type,
+                    guidance_scale=self.config.guidance_scale,
+                )
+        finally:
+            if was_training:
+                self.transformer.train()
+
+        value = loss.item()
+        print(f"Eval (step {step}): heldout_loss={value:.5f}", flush=True)
+        self._fire_callbacks("on_evaluate", epoch=step, mean_reward=value)
+        return value
+
     def _fire_callbacks(self, method: str, **kwargs):
         for cb in self.callbacks:
             getattr(cb, method)(self, **kwargs)
@@ -178,6 +248,9 @@ class SFTTrainer:
 
         self.transformer.train()
         data_iter = iter(self.dataloader)
+
+        # baseline before any update, so the curve starts from the untrained model
+        self._evaluate(0)
 
         while self.global_step < max_steps:
             try:
@@ -201,6 +274,9 @@ class SFTTrainer:
                 print(f"Step {self.global_step}/{max_steps} | loss={metrics['loss']:.4f}")
                 self._fire_callbacks("on_epoch_end", epoch=self.global_step, metrics=metrics)
 
+            if self.global_step % config.eval_every_steps == 0:
+                self._evaluate(self.global_step)
+
             if self.global_step % config.save_every == 0:
                 self._save_checkpoint(self.global_step)
 
@@ -209,8 +285,15 @@ class SFTTrainer:
         print("SFT training complete.")
 
     def _save_checkpoint(self, step: int):
+        # only the LoRA adapter is trainable, so save_pretrained would write ~5GB
+        # of frozen base weights per checkpoint; same fix as the other trainers
+        from peft.utils import get_peft_model_state_dict
+
         save_path = Path(self.config.output_dir) / f"checkpoint-{step}"
         save_path.mkdir(parents=True, exist_ok=True)
-        self.transformer.save_pretrained(str(save_path))
+        try:
+            torch.save(get_peft_model_state_dict(self.transformer), save_path / "adapter_model.bin")
+        except Exception:
+            self.transformer.save_pretrained(str(save_path))
         print(f"Saved checkpoint to {save_path}")
         self._fire_callbacks("on_save", epoch=step, path=str(save_path))

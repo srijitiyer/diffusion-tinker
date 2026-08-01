@@ -31,3 +31,13 @@ class SFTConfig(BaseDiffusionConfig):
 
     # Condition dropout for CFG
     condition_dropout: float = 0.1
+
+    # Examples held back from training and used to report a validation loss.
+    # SFT optimizes a denoising loss rather than a reward, so "did it work" is
+    # whether the loss falls on data the model is not fitting - the training loss
+    # falls either way. This existed only as a run-script callback, which meant
+    # anyone using SFTTrainer directly got no held-out signal at all. 0 disables.
+    holdout_size: int = 0
+    # Steps between validation passes. The held-out batch is encoded once and its
+    # noise and timesteps are fixed, so a pass is one forward and cheap.
+    eval_every_steps: int = 100
