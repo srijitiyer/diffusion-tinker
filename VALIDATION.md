@@ -199,11 +199,35 @@ restarted several of them:
 
 | arm | n | epoch 0 | mean of the rest | best | last 5 |
 |---|---|---|---|---|---|
-| `hb0` data_beta 0 (= FlowGRPO) | 9 | 0.541 | 0.575 | 0.621 | 0.586 |
+| `hb0` data_beta 0 (= FlowGRPO) | 14 | 0.541 | 0.546 | 0.562 | 0.550 |
+| `hb0` rerun, same seed | 9 | 0.541 | 0.575 | 0.621 | 0.586 |
 | `hb001` 0.01 | 6 | 0.541 | 0.564 | 0.596 | 0.564 |
 | `hb005` 0.05 | 10 | 0.541 | 0.546 | 0.565 | 0.544 |
 | `hb03` 0.3 | 13 | 0.541 | 0.560 | 0.594 | 0.567 |
-| `hk001` FlowGRPO reverse-KL 0.01 | 5 | 0.541 | 0.540 | 0.560 | 0.540 |
+| `hk001` FlowGRPO reverse-KL 0.01 | 7 | 0.541 | 0.560 | 0.583 | 0.560 |
+
+**A rerun of one arm settles it.** atlas29 killed `hb0` partway and the supervisor
+resubmitted it, which produced two complete runs of the *identical* configuration
+- same seed, same held-out set, same everything:
+
+| `hb0` (data_beta 0) | n | peak | last 5 | mean after ep 0 |
+|---|---|---|---|---|
+| first run | 9 | 0.621 | 0.586 | 0.575 |
+| rerun | 14 | 0.562 | 0.550 | 0.546 |
+
+The two differ in mean by **0.029**. The spread across the four different beta
+arms is **also 0.029**. Run-to-run variation at a fixed configuration is the same
+size as the variation the sweep was built to detect, so the sweep detects nothing.
+
+The consequence is worth stating bluntly: depending on which of the two runs you
+happen to have, `hb0` is either the best arm in the sweep (0.575, top of the
+table) or tied for the worst (0.546). Any ranking of these arms is a statement
+about which run finished, not about beta.
+
+Runs at the same seed diverge for the reason already recorded for
+FlowGRPO-vs-DDRL past epoch 0: bf16 GEMM nondeterminism across processes, which
+RL's feedback loop amplifies. This is the first time it has been measured at the
+scale of a whole run rather than a single epoch.
 
 **Every point of every arm lies inside +/-1 SEM of the untrained baseline.** The
 spread between arm means is 0.029 (0.546 to 0.575, excluding `hk001`), while the

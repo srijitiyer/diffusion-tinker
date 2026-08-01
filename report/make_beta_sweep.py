@@ -31,6 +31,12 @@ ARMS = [
     ("hb005", r"DDRL  data $\beta$=0.05", "#4292c6"),
     ("hb03", r"DDRL  data $\beta$=0.3", "#08519c"),
     ("hk001", r"FlowGRPO  reverse-KL $\beta$=0.01", "#d62728"),
+    # A second, complete run of hb0 at the identical config and seed. atlas29
+    # crashed the first one, the supervisor resubmitted, and the replicate is the
+    # single most useful curve here: it shows how far two runs that differ in
+    # nothing at all drift apart, which is the scale any claim about beta has to
+    # beat.
+    ("hb0rep", r"DDRL  data $\beta$=0, rerun (same seed)", "#555555"),
 ]
 
 
@@ -61,7 +67,7 @@ def main():
             continue
         if baseline is None:
             baseline = ys[0]
-        ls = "--" if tag == "hk001" else "-"
+        ls = "--" if tag in ("hk001", "hb0rep") else "-"
         ax.plot(xs, ys, ls, color=color, label=label, lw=1.9, marker="o", ms=3)
         # last five points rather than the single best: with SEM ~0.07 per point
         # the max over fifteen points is mostly a draw from the noise.
