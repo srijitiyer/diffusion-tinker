@@ -47,8 +47,9 @@ class BaseDiffusionTrainer(ABC):
 
         self._setup_model(model)
 
+        reward_device = getattr(config, "reward_device", None) or str(self.device)
         self.reward_fn = resolve_reward(
-            reward_funcs, device=str(self.device), reward_weights=reward_weights, reward_mode=reward_mode
+            reward_funcs, device=reward_device, reward_weights=reward_weights, reward_mode=reward_mode
         )
 
         self.stat_tracker = PerPromptStatTracker(global_std=config.advantage_global_std)

@@ -39,6 +39,14 @@ class BaseDiffusionConfig:
     # trajectories per epoch. None = use all prompts every epoch.
     prompts_per_epoch: int | None = None
 
+    # Device for the reward model. None means the training device. Some reward
+    # models do not coexist happily with a large transformer on one card: FLUX
+    # plus OWLv2 (the counting detector) segfaults in a linear forward at every
+    # group size and at both 512px and 256px, while the same setup with the OCR
+    # reward trains fine, so it is not a memory ceiling. "cpu" trades reward
+    # throughput for getting the run to complete at all.
+    reward_device: str | None = None
+
     # Held-out prompts for evaluation. None = fall back to the first
     # num_eval_prompts training prompts, which measures fit on the training set
     # rather than generalization, so pass a real held-out list for any result
