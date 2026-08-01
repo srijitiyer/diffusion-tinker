@@ -29,3 +29,18 @@ class DiffusionDPOConfig(BaseDiffusionConfig):
     train_batch_size: int = 4
     max_train_steps: int = 2000
     dataloader_num_workers: int = 4
+
+    # Held-out preference split. This trainer reported only its training loss,
+    # which is the same failure mode the audit found in DRaFT: the number goes
+    # down and says nothing about generalization. Set eval_split to a split the
+    # training run does not touch and it reports preference accuracy - the
+    # fraction of held-out pairs where the implicit reward prefers the winner,
+    # which is 0.5 for an untrained adapter and is the metric the DPO paper
+    # reports. None disables it.
+    eval_split: str | None = None
+    num_eval_pairs: int = 64
+    # Denoising timesteps averaged per pair. The implicit reward is a Monte-Carlo
+    # estimate over (t, noise), so a single draw per pair is far too noisy to
+    # rank a pair; averaging a fixed set of draws makes the metric comparable
+    # across evals.
+    num_eval_timesteps: int = 8

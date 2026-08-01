@@ -76,6 +76,30 @@ class DiffusionDPOTrainer:
         )
         print(f"Dataset loaded: {len(pref_ds)} preference pairs")
 
+        self.eval_loader = None
+        if self.config.eval_split:
+            eval_hf = load_dataset(self.config.dataset_name, split=self.config.eval_split)
+            eval_ds = PreferenceDataset(
+                hf_dataset=eval_hf,
+                winner_col=self.config.image_column_winner,
+                loser_col=self.config.image_column_loser,
+                caption_col=self.config.caption_column,
+                label_col=self.config.label_column,
+                resolution=self.config.resolution,
+            )
+            # not shuffled: every eval must see the same pairs in the same order
+            # Eval is 4 forwards per pair per timestep, so it batches wider than
+            # training even when training runs at batch 1 to fit memory. There is
+            # no backward here, so the activations do not have to be kept.
+            self.eval_loader = DataLoader(
+                eval_ds,
+                batch_size=max(4, self.config.train_batch_size),
+                shuffle=False,
+                num_workers=self.config.dataloader_num_workers,
+                collate_fn=preference_collate_fn,
+            )
+            print(f"Held-out split '{self.config.eval_split}': {len(eval_ds)} pairs")
+
     def _encode_prompts(self, prompts: list[str]):
         do_cfg = False
         prompt_embeds, _, pooled_prompt_embeds, _ = self.pipeline.encode_prompt(
@@ -185,6 +209,88 @@ class DiffusionDPOTrainer:
             "implicit_reward": inside_sigmoid.mean().item(),
         }, loss
 
+    @torch.no_grad()
+    def _evaluate(self, step: int) -> float | None:
+        """Preference accuracy on a held-out split.
+
+        For each pair, score the implicit reward -(loss_model - loss_ref) on the
+        winner and on the loser and check which is higher. That is the same
+        quantity the training loss pushes on, measured on pairs the run never
+        saw, so it is the DPO analogue of the held-out reward every other trainer
+        reports. Chance is 0.5.
+
+        Everything that makes the number comparable across evals is pinned: the
+        same pairs, the same timesteps, the same noise, every time. The eval
+        draws from its own generator so training does not shift the stream.
+        """
+        if self.eval_loader is None:
+            return None
+
+        config = self.config
+        autocast_dtype = torch.bfloat16 if config.mixed_precision == "bf16" else torch.float16
+        was_training = self.transformer.training
+        self.transformer.eval()
+
+        correct = 0
+        total = 0
+        gen = torch.Generator(device="cpu").manual_seed(config.eval_seed)
+        # a fixed spread of noise levels rather than random ones, so no eval is
+        # luckier than another in where it sampled the schedule
+        ts = torch.linspace(0.1, 0.9, config.num_eval_timesteps)
+
+        try:
+            for batch in self.eval_loader:
+                if total >= config.num_eval_pairs:
+                    break
+                B = batch["winner"].shape[0]
+                w_lat = encode_to_latents(self.vae, batch["winner"].to(self.device, dtype=self.vae.dtype))
+                l_lat = encode_to_latents(self.vae, batch["loser"].to(self.device, dtype=self.vae.dtype))
+                prompt_embeds, pooled_embeds = self._encode_prompts(batch["prompts"])
+
+                margin = torch.zeros(B, device=self.device)
+                for t_val in ts:
+                    t_bc = torch.full((B, 1, 1, 1), float(t_val), device=self.device)
+                    noise = torch.randn(w_lat.shape, generator=gen).to(self.device, dtype=w_lat.dtype)
+                    timestep = torch.full((B,), float(t_val) * 1000.0, device=self.device)
+
+                    deltas = []
+                    for lat in (w_lat, l_lat):
+                        noisy = (1.0 - t_bc) * lat + t_bc * noise
+                        target = noise - lat
+                        with torch.autocast(device_type=self.device.type, dtype=autocast_dtype):
+                            v_model = self.transformer(
+                                hidden_states=noisy, timestep=timestep,
+                                encoder_hidden_states=prompt_embeds,
+                                pooled_projections=pooled_embeds, return_dict=False,
+                            )[0]
+                            self.transformer.disable_adapters()
+                            try:
+                                v_ref = self.transformer(
+                                    hidden_states=noisy, timestep=timestep,
+                                    encoder_hidden_states=prompt_embeds,
+                                    pooled_projections=pooled_embeds, return_dict=False,
+                                )[0]
+                            finally:
+                                self.transformer.enable_adapters()
+                        l_model = (target.float() - v_model.float()).pow(2).mean(dim=[1, 2, 3])
+                        l_ref = (target.float() - v_ref.float()).pow(2).mean(dim=[1, 2, 3])
+                        # implicit reward is the negative change in denoising loss
+                        deltas.append(-(l_model - l_ref))
+                    margin += deltas[0] - deltas[1]
+
+                correct += (margin > 0).sum().item()
+                total += B
+        finally:
+            if was_training:
+                self.transformer.train()
+
+        if total == 0:
+            return None
+        acc = correct / total
+        print(f"Eval (step {step}): preference accuracy={acc:.3f} on {total} held-out pairs", flush=True)
+        self._fire_callbacks("on_evaluate", epoch=step, mean_reward=acc)
+        return acc
+
     def _fire_callbacks(self, method: str, **kwargs):
         for cb in self.callbacks:
             getattr(cb, method)(self, **kwargs)
@@ -198,6 +304,11 @@ class DiffusionDPOTrainer:
         self.transformer.train()
         data_iter = iter(self.dataloader)
         global_step = 0
+
+        # Baseline first, before any update, so the curve starts at the untrained
+        # adapter. Chance is 0.5 there; anything else means the eval is leaking.
+        eval_interval = max(1, self.config.max_train_steps // 10)
+        self._evaluate(0)
 
         while global_step < self.config.max_train_steps:
             try:
@@ -224,6 +335,9 @@ class DiffusionDPOTrainer:
                 print(log_str)
                 self._fire_callbacks("on_epoch_end", epoch=global_step, metrics=metrics)
 
+            if global_step % eval_interval == 0:
+                self._evaluate(global_step)
+
             if global_step % 500 == 0:
                 self._save_checkpoint(global_step)
 
@@ -232,8 +346,16 @@ class DiffusionDPOTrainer:
         print("DiffusionDPO training complete.")
 
     def _save_checkpoint(self, step: int):
+        # Same reason as BaseDiffusionTrainer._save_adapter: only the adapter is
+        # trainable, so save_pretrained would write ~5GB of frozen base weights
+        # every 500 steps. This trainer was missed when that was fixed elsewhere.
+        from peft.utils import get_peft_model_state_dict
+
         save_path = Path(self.config.output_dir) / f"checkpoint-{step}"
         save_path.mkdir(parents=True, exist_ok=True)
-        self.transformer.save_pretrained(str(save_path))
+        try:
+            torch.save(get_peft_model_state_dict(self.transformer), save_path / "adapter_model.bin")
+        except Exception:
+            self.transformer.save_pretrained(str(save_path))
         print(f"Saved checkpoint to {save_path}")
         self._fire_callbacks("on_save", epoch=step, path=str(save_path))
