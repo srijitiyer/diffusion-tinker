@@ -415,6 +415,14 @@ pair diverges). A fourth is not worth proposing without single-variable evidence
 The table is not a mechanism and is not meant as one; it is only the operational
 conclusion, which is to keep long runs off atlas29.
 
+Moving off it is not currently possible for these runs. The a5000 node is stable
+but full, and the 16GB a4000s - 28 of them free - cannot hold an SD3.5 rollout at
+group 12 and 512px. Two probes OOMed with **byte-identical** figures at
+`train_batch_size` 3 and 1 (15.41 GiB in use, 512 MiB requested, 186.56 MiB free),
+which places the failure before the replay minibatch loop and rules out the batch
+size as the lever. Fitting a4000 would mean changing the group size or the
+resolution, either of which changes what is being measured.
+
 Two lessons worth keeping. "Slow" and "wedged" look identical through RSS growth,
 and a real allocation under `timeout` separates them. And a throughput number is
 only meaningful from the node that will do the reading - measuring on the login
