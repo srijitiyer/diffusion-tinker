@@ -21,8 +21,8 @@ smoke tests. "Validated" = the intended objective actually moves in a real run.
 | DDRL (anchor, transform off) | **validated: gradual climb, no collapse** | The canonical configuration, eleven evals each against the 0.300 baseline. beta=0.01 reaches **0.815**, beta=0.05 reaches **0.860**. Both oscillate on the way up and neither collapses through epoch 20. Anchor active throughout, ratio ~0.999. This is the gradual increase at or above FlowGRPO's level that Haotian described for a small beta |
 | DDRL (anchor + monotonic transform) | **opt-in flag, off by default** | 0.300 → 0.482 → 0.893±0.036 → 0.892 → 0.873 → 0.851 (ep2..ep10), n=44, anchor active (`data_loss` ~0.268), ratio 0.9993. Climbs then holds past epoch 10, where the old collapse appeared. Kept as evidence the re-centering fix works, not as a headline result |
 | DRaFT | **validated on a held-out set for the first time** | 5.440 → 5.718 across 13 evals. The pre-audit 5.9→9.6 was **train** reward: DRaFTTrainer does not inherit BaseDiffusionTrainer, so it never called _evaluate and only ever reported the reward it directly optimizes on the prompts it optimizes. It now has a matching held-out eval |
-| SFT | **validated, and it overfits** | held-out flow-matching loss on 16 unseen examples at fixed noise and timesteps: 0.21184 → **minimum 0.19742** (−6.8%) → 0.20035 by the end, so it turns over and gives back 1.5%. The pre-audit note only said the training loss converges, which a denoising objective does by construction; the turnover is invisible without a held-out set and is an argument for `early_stop_patience`, which the config supports and this run did not use |
-| DiffusionDPO | **runs, but separates one-sidedly** | the blocker was not HF gating: yuvalkirstain/pickapic_v1 and v2 both 404 now, so accepting terms would not have helped. `kashif/pickascore` is an ungated mirror with the same schema. Two real defects also had to be fixed first: the missing 0.5 in the loss (paper beta=5000 was behaving like 10000), and PreferenceDataset assuming PIL images where Pick-a-Pic stores raw jpeg bytes. 2000 steps, EXIT 0, peak 16.8 GB. Over 40 logged steps the separation is asymmetric: the loser's loss rises in 34/40 and the implicit reward is positive in 27/40, but the winner's loss falls in only 15/40, below chance. So it learns the preference mainly by suppressing the loser rather than by favouring the winner |
+| SFT | **validated, and it overfits; eval moved into the library Aug 1** | held-out flow-matching loss on 16 unseen examples at fixed noise and timesteps: 0.21184 → **minimum 0.19742** (−6.8%) → 0.20035 by the end, so it turns over and gives back 1.5%. The pre-audit note only said the training loss converges, which a denoising objective does by construction; the turnover is invisible without a held-out set and is an argument for `early_stop_patience`, which the config supports and this run did not use. That held-out loss came from a callback defined in the cluster run script, so it was real for that run and absent for anyone calling `SFTTrainer` directly; `holdout_size`/`eval_every_steps` now do it inside the trainer, and `s_sft3` is queued to confirm the built-in path reproduces it |
+| DiffusionDPO | **runs, separates one-sidedly; held-out metric added Aug 1** | the blocker was not HF gating: yuvalkirstain/pickapic_v1 and v2 both 404 now, so accepting terms would not have helped. `kashif/pickascore` is an ungated mirror with the same schema. Two real defects also had to be fixed first: the missing 0.5 in the loss (paper beta=5000 was behaving like 10000), and PreferenceDataset assuming PIL images where Pick-a-Pic stores raw jpeg bytes. 2000 steps, EXIT 0, peak 16.8 GB. Over 40 logged steps the separation is asymmetric: the loser's loss rises in 34/40 and the implicit reward is positive in 27/40, but the winner's loss falls in only 15/40, below chance. So it learns the preference mainly by suppressing the loser rather than by favouring the winner. That run had no held-out metric at all - only its own training loss, the same failure DRaFT had. It now reports preference accuracy on unseen pairs plus the mean margin, and a re-run with it is in flight. Two further defects were found in the same pass: it drew independent noise for winner and loser where the reference shares one draw, and it still checkpointed the whole transformer |
 
 **FlowGRPO(β=0) ≡ DDRL(β=0).** Not approximately: the base advantage clamps the
 group-normalized reward to ±5, and DDRL's reduces to exactly that when
@@ -106,6 +106,30 @@ their ceiling, not smooth rewards as a class.
 FLUX also could not run DDRL with an anchor or SFT at all, because
 `compute_flow_matching_loss` spoke only SD3 (no `img_ids`/`txt_ids`/`guidance`,
 unpacked latents, `timestep = sigma*1000`). Fixed and shape-verified.
+
+## Beta sweep (in flight)
+
+Haotian asked for beta 0, 0.01 and upward. An earlier grid (`t_grid2.py`, the
+`c2_*` curves) did sweep both `kl_beta` and `data_beta`, so the sweep existed -
+but it passed no `eval_prompts` and no `eval_seed`, so it scored the first four
+*training* prompts, and it ran on counting 2-4 objects where the base model is
+already at 0.792 and every arm saturates at 1.000. It is retracted for those two
+reasons rather than for the sweep being absent.
+
+The replacement runs on counting 6-9 objects, the one task with measured headroom,
+with everything matched except the regularizer weight: `hb0` (data_beta 0, which
+is FlowGRPO), `hb001` (0.01), `hb005` (0.05), `hb03` (0.3), and `hk001` (FlowGRPO
+reverse-KL beta 0.01). Held-out prompts, fixed eval seed, 12 prompts x 2 samples.
+
+One result is already in and does not need the curves: **all four DDRL arms
+reported an epoch-0 held-out reward of 0.541 +/- 0.071 (n=24), identical to three
+decimals across four independent processes.** That is the eval determinism claim
+tested the hard way - same seed, same held-out set, four separate jobs - rather
+than asserted from the code.
+
+Curves are not yet long enough to compare. On these the SEM is ~0.06-0.08, so
+fewer than about eight points says nothing, and nothing below that bar will be
+reported here.
 
 ## Known gaps
 
