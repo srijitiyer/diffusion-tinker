@@ -42,6 +42,14 @@ class DDRLTrainer(BaseDiffusionTrainer):
                 self.config.data_beta = 0.0
             return
 
+        if self.config.data_beta == 0:
+            # The data term is switched off, so encoding the anchor images would
+            # cost a VAE pass and hold latents the loss never reads. Skipping it
+            # also makes data_beta=0 exactly FlowGRPO, which is what the bottom
+            # of a beta sweep is supposed to be.
+            print("data_beta=0, skipping anchor dataset (no forward-KL term)")
+            return
+
         print(f"Loading data for DDRL forward KL: {self.config.train_dataset}...")
         from datasets import load_dataset
 
