@@ -405,8 +405,15 @@ about it without needing a mechanism:
 
 | node | segfaulted | completed cleanly |
 |---|---|---|
-| atlas29 (a6000-Ada) | 14 | 0 |
-| atlas24 (a5000) | 0 | 2 |
+| atlas29 (a6000-Ada) | 20 | 0 |
+| atlas24 (a5000) | 1 | 2 |
+
+An earlier version of this table read `atlas24: 0` and was used to argue the
+crash was specific to atlas29. That was wrong: `h_ddpo` (job 16429553) later
+segfaulted on atlas24 with the same signature, inside a linear forward. The rate
+still differs by more than an order of magnitude, so keeping long runs off
+atlas29 remains the right operational call, but **atlas24 is not safe, only
+safer**, and the node is not a sufficient explanation.
 
 Three causal explanations were proposed earlier and each was disproved by the next
 run (a 48GB ceiling - 256px quarters the memory and crashes the same; OWLv2
