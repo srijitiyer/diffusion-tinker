@@ -26,10 +26,17 @@ class BaseDiffusionConfig:
     # collects a full batch (num_prompts * num_samples_per_prompt trajectories),
     # but replaying all of them through the transformer at once OOMs once the
     # group size is large. When set, the training step splits the batch into
-    # chunks of this many trajectories and accumulates gradients across them,
-    # so memory is bounded by train_batch_size instead of the full batch. This
-    # is what lets you use many diverse prompts at a large group size (FlowGRPO's
-    # actual setup) on a single GPU. None = replay the whole batch at once.
+    # chunks of this many trajectories, so memory is bounded by train_batch_size
+    # instead of the full batch. This is what lets you use many diverse prompts
+    # at a large group size (FlowGRPO's actual setup) on a single GPU.
+    # None = replay the whole batch at once.
+    #
+    # This is minibatch SGD, NOT gradient accumulation: the trainers zero_grad
+    # and step once per chunk, so halving this doubles the number of optimizer
+    # steps per epoch and halves the batch each one sees. It therefore changes
+    # the optimization, and two runs that differ in train_batch_size are not a
+    # controlled comparison. (This comment previously said "accumulates gradients
+    # across them", which is what the memory-knob reading assumes and is wrong.)
     train_batch_size: int | None = None
 
     # When train_prompts is a large pool, sample this many prompts per epoch
