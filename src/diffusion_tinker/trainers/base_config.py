@@ -105,4 +105,12 @@ class BaseDiffusionConfig:
     output_dir: str = "./output"
     seed: int = 42
     save_best: bool = True
-    early_stop_patience: int = 0  # 0 = disabled, N = stop after N evals with no improvement
+    # Stop after this many consecutive evals without a new best. 0 disables it.
+    # Worth turning on: measured runs give back real performance past their peak.
+    # SFT reaches a held-out minimum of 0.19742 around step 3098 and drifts back
+    # to 0.20035; FLUX + DDRL degrades held-out on every task tried while its
+    # training reward keeps rising (counting 0.667 -> 0.580, exact-match OCR
+    # 0.625 -> 0.375). The training loss and the training reward both keep
+    # improving throughout, so nothing about this is visible without a held-out
+    # eval, and the best checkpoint is already being written on improvement.
+    early_stop_patience: int = 0
