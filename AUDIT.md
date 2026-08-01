@@ -252,6 +252,64 @@ for it.
 
 ---
 
+## 10b. Defects found by asking which trainers had never produced a curve
+
+Every earlier section came from reading code or chasing a symptom. This set came
+from a different question: which trainers have ever produced a real held-out
+curve? Two had not. DDPO had exactly one eval point, and DiffusionDPO had zero.
+Reading DiffusionDPO closely for the first time found three more defects.
+
+**Winner and loser got independent noise draws.** The reference chunks the
+concatenated batch and repeats the winner's noise, so both branches see the same
+noise and the two Monte-Carlo errors partly cancel. Measured on a fixed pair with
+a perturbed copy of the model as the policy:
+
+| | sigmoid argument std | fraction past \|arg\|>8 |
+|---|---|---|
+| shared noise (reference) | 2.79 | 0.2% |
+| independent draws (ours) | 3.65 | 2.5% |
+
+Past `|arg| > 8` logsigmoid is flat and the gradient is gone. With `beta = 5000`
+that tail is the part that matters. A first attempt to measure this showed no
+difference at all, because it averaged over the batch and all spatial dimensions
+before comparing - the effect is per-sample, and per-sample is what enters the
+loss.
+
+**Two more trainers still serialized the whole transformer.** `SFTTrainer` and
+`DRaFTTrainer` do not inherit `BaseDiffusionTrainer`, so neither picked up the
+adapter-only checkpointing fix; both were writing ~5GB of frozen base weights per
+checkpoint against the ~26MB that is trainable.
+
+**Two trainers had no held-out metric in the library at all.** DiffusionDPO
+reported only its own training loss. SFT's held-out loss existed, but only as a
+`HeldOutLoss` callback defined in a cluster run script, so the measurement was
+real for that one run and absent for anyone using `SFTTrainer` directly. Both now
+report inside the trainer: DiffusionDPO gives preference accuracy (the fraction of
+unseen pairs where the implicit reward ranks the winner higher, chance 0.5) plus
+the mean margin, and SFT gives a held-out flow-matching loss. In both cases the
+pairs, timesteps and noise are pinned, so a move in the number is a move in the
+model.
+
+The DPO metric's own first output caught a defect in itself: it reported
+`accuracy = 0.000` at step 0. That is correct arithmetic - LoRA's B matrix is
+zero-initialized, so the policy and the reference are the same network and every
+margin is exactly 0.0, which `margin > 0` scores as a loss. Ties now count as
+half, which puts step 0 at exactly 0.500 and doubles as an initialization check.
+
+## 10c. The logger was deleting the results
+
+`CSVLogger` opened both curve files with `"w"`. Every restart therefore truncated
+the eval curve and began again at epoch 0. That was harmless while runs completed,
+and became severe once the supervisor started resubmitting after segfaults: the
+mechanism built to keep runs alive was erasing the measurements it existed to
+protect, and no run on an unstable node could ever accumulate the ~8 points these
+curves need. Files are now rotated to `<tag>_eval.runN.csv`, so a crash costs
+training progress - there is no resume - but never data.
+
+Relatedly, eval ran every 2 epochs, so 8 points needed roughly 4.3 uninterrupted
+hours. Eval costs about a third of an epoch here, so moving to every epoch is
+~17% more compute to halve the window a usable curve requires.
+
 ## 11. Conclusions this invalidates
 
 Do not reuse these:
@@ -303,6 +361,16 @@ keeps tensor fields aligned with the prompts list. A misalignment there pairs ea
 trajectory with another sample's advantage, which trains without error and learns
 nothing.
 
+Three of the fixes above were held in place by nothing but a comment, so they now
+have tests. `test_ddrl_monotonic_transform_recentered` asserts the transformed
+advantages are zero-mean per group and that the transform preserves the ranking;
+`test_buffered_tracker_differs_from_grpo` asserts DDPO's estimator responds to a
+batch that beats the prompt's history where GRPO's is centered by construction;
+`test_kl_variance_finite_at_sigma_one` asserts the KL divisor stays finite and
+non-zero at sigma = 1. Each new assertion was checked against the pre-fix
+behaviour to confirm it actually fails there - the uncentered group mean is
+-1.415 and the uncapped std is `inf`, so none of the three is vacuous.
+
 ## 14. Infrastructure
 
 The sbatch preflight now runs under `timeout` and performs a real allocation and
@@ -328,6 +396,24 @@ is specific to atlas29's path to `/atlas`, not to the filesystem generally. At
 `safetensors` mmap fault the pages in semi-randomly instead measured ~0.7 MB/s,
 which is the ~13-hour version. Streaming the blobs once before loading (`WARM` in
 the sbatch) converts the second case into the first.
+
+**atlas29 also segfaults runs outright**, inside a transformer forward, at random
+points, and this was recorded for a while as FLUX-specific. It is not: `hb005`, an
+SD3.5-medium run, crashed the same way in `diffusers/models/normalization.py` with
+node memory at 507 of 770 GB. Counting the crashes by node settles what to do
+about it without needing a mechanism:
+
+| node | segfaulted | completed cleanly |
+|---|---|---|
+| atlas29 (a6000-Ada) | 14 | 0 |
+| atlas24 (a5000) | 0 | 2 |
+
+Three causal explanations were proposed earlier and each was disproved by the next
+run (a 48GB ceiling - 256px quarters the memory and crashes the same; OWLv2
+co-residency - `reward_device=cpu` crashes the same; a config edge case - a matched
+pair diverges). A fourth is not worth proposing without single-variable evidence.
+The table is not a mechanism and is not meant as one; it is only the operational
+conclusion, which is to keep long runs off atlas29.
 
 Two lessons worth keeping. "Slow" and "wedged" look identical through RSS growth,
 and a real allocation under `timeout` separates them. And a throughput number is
