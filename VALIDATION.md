@@ -240,6 +240,17 @@ The figure is drawn with the SEM band shaded for that reason: the arms only span
 the longest arm to 13 points did not change any of this - its last five average
 0.567, still inside the band.
 
+**The sweep was redesigned rather than extended.** Five betas at one seed each
+cannot separate a 0.03 effect when two runs of one config differ by 0.029; more
+epochs of the same design only add draws from the same band. Replicate seeds are
+the only lever - the eval latents are pinned by `eval_seed` and identical across
+runs, so the divergence is the policy and not the measurement, and raising the
+eval sample count would not touch it. The second design is two betas at the ends
+of the range with four seeds each (`b0s42`..`b0s45`, `b3s42`..`b3s45`), which puts
+the standard error on the arm difference at about 0.015 and a 0.03 effect at
+roughly 2 SE. The middle betas are dropped: if 0 and 0.3 do not separate, 0.01 and
+0.05 will not.
+
 What this does **not** say. It does not say the anchor is useless - its job is to
 stop drift over long training, and ten epochs is early for drift to appear. It
 does not say the arms are equal, only that this experiment cannot tell them
