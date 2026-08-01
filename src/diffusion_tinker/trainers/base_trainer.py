@@ -233,6 +233,27 @@ class BaseDiffusionTrainer(ABC):
         """Algorithm-specific training step. Must be implemented by subclass."""
         raise NotImplementedError
 
+    def _save_adapter(self, path):
+        """Write just the LoRA adapter, not the whole transformer.
+
+        The model is a base transformer with an adapter injected via
+        `add_adapter`, so `save_pretrained` serialises every base weight. On SD3.5
+        that is ~5GB per save; on FLUX it is ~24GB, and against this cluster's
+        storage a single "new best" write took longer than the training it was
+        checkpointing. Only the adapter is trainable, so only the adapter is worth
+        writing - about 26MB.
+        """
+        from peft.utils import get_peft_model_state_dict
+
+        path.mkdir(parents=True, exist_ok=True)
+        try:
+            state = get_peft_model_state_dict(self.transformer)
+            torch.save(state, path / "adapter_model.bin")
+        except Exception:
+            # if the adapter cannot be isolated, fall back rather than lose the
+            # checkpoint entirely
+            self.transformer.save_pretrained(str(path))
+
     def _fire_callbacks(self, method: str, **kwargs):
         for cb in self.callbacks:
             getattr(cb, method)(self, **kwargs)
@@ -326,8 +347,7 @@ class BaseDiffusionTrainer(ABC):
 
     def _save_checkpoint(self, epoch: int):
         save_path = Path(self.config.output_dir) / f"checkpoint-{epoch}"
-        save_path.mkdir(parents=True, exist_ok=True)
-        self.transformer.save_pretrained(str(save_path))
+        self._save_adapter(save_path)
         print(f"Saved checkpoint to {save_path}")
         self._fire_callbacks("on_save", epoch=epoch, path=str(save_path))
 
@@ -401,8 +421,7 @@ class BaseDiffusionTrainer(ABC):
             self._evals_without_improvement = 0
             if self.config.save_best:
                 best_path = Path(self.config.output_dir) / "checkpoint-best"
-                best_path.mkdir(parents=True, exist_ok=True)
-                self.transformer.save_pretrained(str(best_path))
+                self._save_adapter(best_path)
                 print(f"New best eval reward: {mean_reward:.3f} (saved to {best_path})")
         else:
             self._evals_without_improvement += 1
