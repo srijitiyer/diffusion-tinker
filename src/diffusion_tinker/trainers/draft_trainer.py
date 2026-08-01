@@ -297,6 +297,22 @@ class DRaFTTrainer:
         self.transformer.train()
         return mean_reward
 
+    def _save_adapter(self, path: Path):
+        """Write just the LoRA adapter.
+
+        DRaFTTrainer does not inherit BaseDiffusionTrainer, so it did not pick up
+        the adapter-only checkpointing fix and kept calling save_pretrained on the
+        whole transformer - ~5GB of frozen base weights per checkpoint, against
+        the ~26MB that is actually trainable.
+        """
+        from peft.utils import get_peft_model_state_dict
+
+        path.mkdir(parents=True, exist_ok=True)
+        try:
+            torch.save(get_peft_model_state_dict(self.transformer), path / "adapter_model.bin")
+        except Exception:
+            self.transformer.save_pretrained(str(path))
+
     def _fire_callbacks(self, method: str, **kwargs):
         for cb in self.callbacks:
             getattr(cb, method)(self, **kwargs)
@@ -364,13 +380,11 @@ class DRaFTTrainer:
 
             if epoch > 0 and epoch % config.save_every == 0:
                 save_path = Path(config.output_dir) / f"checkpoint-{epoch}"
-                save_path.mkdir(parents=True, exist_ok=True)
-                self.transformer.save_pretrained(str(save_path))
+                self._save_adapter(save_path)
                 self._fire_callbacks("on_save", epoch=epoch, path=str(save_path))
 
         save_path = Path(config.output_dir) / f"checkpoint-{config.num_epochs}"
-        save_path.mkdir(parents=True, exist_ok=True)
-        self.transformer.save_pretrained(str(save_path))
+        self._save_adapter(save_path)
         self._fire_callbacks("on_save", epoch=config.num_epochs, path=str(save_path))
         self._fire_callbacks("on_train_end")
         print("DRaFT training complete.")
