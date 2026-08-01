@@ -149,9 +149,29 @@ same held-out prompts. That is within one SEM, but the four same-node arms agree
 to three decimals while this differs in the second, so the variable is bf16 GEMM
 kernels differing by architecture. Arms must therefore stay on one node type.
 
-Curves are not yet long enough to compare. On these the SEM is ~0.06-0.08, so
-fewer than about eight points says nothing, and nothing below that bar will be
-reported here.
+Curves as of 11:30 Aug 1, all against the shared 0.541 baseline (per-point SEM
+~0.07, so these are recorded, not yet interpreted):
+
+| arm | held-out, epoch 0.. |
+|---|---|
+| `hb0` (data_beta 0) | 0.541 0.533 0.530 0.607 0.581 0.621 0.602 |
+| `hb001` (0.01) | 0.541 0.531 0.544 0.596 0.572 0.577 |
+| `hb005` (0.05) | 0.541 0.530 0.555 (restarted twice after segfaults) |
+| `hb03` (0.3) | 0.541 0.525 0.544 0.558 0.594 0.553 0.568 |
+| `hk001` (FlowGRPO reverse-KL 0.01) | restarted three times, no points retained |
+
+All three arms with enough length sit above baseline from epoch 3 on. No arm is
+being called ahead of another: at eight points and this SEM the gaps between them
+are not resolvable, and the arms have unequal lengths because atlas29 killed two
+of them repeatedly.
+
+**FLUX counting, revised.** The standing description was train reward rising while
+held-out falls. This run does not show that: held-out is 0.667, 0.660, 0.674,
+0.658 - flat on its baseline - and train reward is 0.689, 0.800, 0.637, 0.461,
+which is falling, not rising. With `prompts_per_epoch=2` the train number is
+dominated by which two prompts were drawn, so it is not evidence of much in
+either direction. What survives is the weaker claim already recorded: FLUX does
+not climb on tasks where it starts near its ceiling.
 
 ## Known gaps
 
