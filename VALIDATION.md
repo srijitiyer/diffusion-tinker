@@ -199,12 +199,12 @@ restarted several of them:
 
 | arm | n | epoch 0 | mean of the rest | best | last 5 |
 |---|---|---|---|---|---|
-| `hb0` data_beta 0 (= FlowGRPO) | 14 | 0.541 | 0.546 | 0.562 | 0.550 |
+| `hb0` data_beta 0 (= FlowGRPO) | 15 | 0.541 | 0.546 | 0.562 | 0.551 |
 | `hb0` rerun, same seed | 9 | 0.541 | 0.575 | 0.621 | 0.586 |
 | `hb001` 0.01 | 6 | 0.541 | 0.564 | 0.596 | 0.564 |
 | `hb005` 0.05 | 10 | 0.541 | 0.546 | 0.565 | 0.544 |
 | `hb03` 0.3 | 13 | 0.541 | 0.560 | 0.594 | 0.567 |
-| `hk001` FlowGRPO reverse-KL 0.01 | 7 | 0.541 | 0.560 | 0.583 | 0.560 |
+| `hk001` FlowGRPO reverse-KL 0.01 | 8 | 0.541 | 0.562 | 0.583 | 0.566 |
 
 **A rerun of one arm settles it.** atlas29 killed `hb0` partway and the supervisor
 resubmitted it, which produced two complete runs of the *identical* configuration
@@ -248,7 +248,9 @@ runs, so the divergence is the policy and not the measurement, and raising the
 eval sample count would not touch it. The second design is two betas at the ends
 of the range with four seeds each (`b0s42`..`b0s45`, `b3s42`..`b3s45`), which puts
 the standard error on the arm difference at about 0.015 and a 0.03 effect at
-roughly 2 SE. The middle betas are dropped: if 0 and 0.3 do not separate, 0.01 and
+roughly 2 SE. All five arms that have started report an epoch-0 held-out reward of
+0.541 across four different training seeds, which is the check that `SEED` touches
+only training: eval is driven by `eval_seed` and must not move with it. The middle betas are dropped: if 0 and 0.3 do not separate, 0.01 and
 0.05 will not.
 
 What this does **not** say. It does not say the anchor is useless - its job is to
