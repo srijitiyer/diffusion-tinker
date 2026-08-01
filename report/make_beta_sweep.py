@@ -21,6 +21,9 @@ import matplotlib.pyplot as plt
 
 CSV_DIR = os.path.join(os.path.dirname(__file__), "beta_csv")
 
+# Standard error of a single eval point: 12 held-out prompts x 2 samples.
+SEM = 0.07
+
 # tag, label, colour
 ARMS = [
     ("hb0", r"DDRL  data $\beta$=0  (= FlowGRPO)", "#999999"),
@@ -67,8 +70,17 @@ def main():
 
     if baseline is not None:
         ax.axhline(baseline, color="black", lw=0.9, ls=":", alpha=0.7)
-        ax.text(0.99, baseline + 0.006, f"untrained {baseline:.3f}", ha="right",
+        # Each point carries a standard error of about 0.07 (24 images), which is
+        # wider than the whole spread between arms. Without this band matplotlib
+        # autoscales to the noise and the figure invents structure that is not
+        # there - shade it so the plot cannot oversell itself.
+        ax.axhspan(baseline - SEM, baseline + SEM, color="black", alpha=0.07, lw=0)
+        ax.text(0.99, baseline + 0.004, f"untrained {baseline:.3f}", ha="right",
                 fontsize=8, color="black", transform=ax.get_yaxis_transform())
+        ax.text(0.99, baseline + SEM - 0.012, f"+/-1 SEM ({SEM:.2f}) on every point",
+                ha="right", fontsize=7.5, color="#555",
+                transform=ax.get_yaxis_transform())
+        ax.set_ylim(baseline - 1.5 * SEM, baseline + 1.5 * SEM)
 
     ax.set_xlabel("epoch")
     ax.set_ylabel("held-out reward (counting accuracy, 6-9 objects)")

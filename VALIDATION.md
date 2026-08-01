@@ -174,6 +174,36 @@ same held-out prompts. That is within one SEM, but the four same-node arms agree
 to three decimals while this differs in the second, so the variable is bf16 GEMM
 kernels differing by architecture. Arms must therefore stay on one node type.
 
+### Result: beta does not separate within 10 epochs
+
+`report/beta_sweep.png` (`report/make_beta_sweep.py`, curves in
+`report/beta_csv/`). Longest surviving run per arm, since atlas29 killed and
+restarted several of them:
+
+| arm | n | epoch 0 | mean of the rest | best |
+|---|---|---|---|---|
+| `hb0` data_beta 0 (= FlowGRPO) | 9 | 0.541 | 0.575 | 0.621 |
+| `hb001` 0.01 | 6 | 0.541 | 0.564 | 0.596 |
+| `hb005` 0.05 | 6 | 0.541 | 0.546 | 0.565 |
+| `hb03` 0.3 | 10 | 0.541 | 0.557 | 0.594 |
+| `hk001` FlowGRPO reverse-KL 0.01 | 3 | 0.541 | 0.523 | 0.541 |
+
+**Every point of every arm lies inside +/-1 SEM of the untrained baseline.** The
+spread between arm means is 0.029 (0.546 to 0.575, excluding `hk001`), while the
+standard error on a single point is 0.07 and on an arm mean is 0.023-0.029. The
+between-arm differences are the same size as the noise on each arm, so no arm can
+be ranked against another and none is distinguishable from doing nothing.
+
+The figure is drawn with the SEM band shaded for that reason: the arms only span
+0.51-0.62, so autoscaling to the data makes noise look like structure.
+
+What this does **not** say. It does not say the anchor is useless - its job is to
+stop drift over long training, and ten epochs is early for drift to appear. It
+does not say the arms are equal, only that this experiment cannot tell them
+apart. Resolving a 0.03 difference at this SEM needs roughly 20x the eval samples
+per point, or far longer runs, or both. And `hk001` has no verdict at all: it
+segfaulted four times and never held more than three points.
+
 Curves as of 11:30 Aug 1, all against the shared 0.541 baseline (per-point SEM
 ~0.07, so these are recorded, not yet interpreted):
 
