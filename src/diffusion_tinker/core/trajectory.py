@@ -62,9 +62,7 @@ class TrajectoryBatch:
             prompts=[self.prompts[i] for i in positions],
             negative_prompt_embeds=self.negative_prompt_embeds[idx] if self.negative_prompt_embeds is not None else None,
             negative_pooled_embeds=self.negative_pooled_embeds[idx] if self.negative_pooled_embeds is not None else None,
-            # img_ids depends only on resolution, so it is shared across the
-            # batch like txt_ids and must not be sliced by sample index
-            img_ids=self.img_ids,
+            img_ids=self.img_ids[idx] if self.img_ids is not None else None,
             txt_ids=self.txt_ids,
             rewards=self.rewards[idx] if self.rewards is not None else None,
             advantages=self.advantages[idx] if self.advantages is not None else None,
