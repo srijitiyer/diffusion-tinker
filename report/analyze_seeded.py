@@ -1,0 +1,92 @@
+"""Pre-registered analysis of the seeded anchor-strength comparison.
+
+Written and committed before the runs finished, deliberately. The first sweep
+produced a table that could be read several ways depending on which statistic you
+reached for (best point, last five, mean over epochs) and which run happened to
+survive, and picking among those after seeing the data is how a null result turns
+into a positive one. So the choices are fixed here in advance:
+
+  - The unit of analysis is a RUN, not an eval point. Points within a run are a
+    time series of one policy and are not independent; runs at different seeds
+    are the replicates. This is the whole reason the design has four seeds.
+  - Each run contributes ONE number: the mean held-out reward over epochs 1..K,
+    excluding epoch 0 (which is the untrained model and identical everywhere).
+  - K is the common length across all runs, so a longer-lived run cannot
+    contribute extra late epochs that the others never got to.
+  - The comparison is a two-sample difference of arm means with the standard
+    error taken from BETWEEN-seed spread. Nothing here uses the per-point SEM,
+    because eval latents are pinned and identical across runs, so that error
+    cancels in a run-to-run comparison.
+  - The verdict threshold is |difference| > 2 SE. Anything else is "no effect
+    detected at this power", which is not the same as "no effect".
+"""
+import csv
+import os
+import statistics
+
+CSV_DIR = os.path.join(os.path.dirname(__file__), "seeded_csv")
+
+ARMS = {
+    "data_beta=0": ["b0s42", "b0s43", "b0s44", "b0s45"],
+    "data_beta=0.3": ["b3s42", "b3s43", "b3s44", "b3s45"],
+}
+MIN_POINTS = 6  # a run with fewer than this is dropped rather than padded
+
+
+def load(tag):
+    path = os.path.join(CSV_DIR, f"{tag}_eval.csv")
+    if not os.path.exists(path):
+        return []
+    with open(path) as f:
+        r = csv.reader(f)
+        next(r, None)
+        return [float(row[1]) for row in r if len(row) >= 2]
+
+
+def main():
+    runs = {}
+    for arm, tags in ARMS.items():
+        for t in tags:
+            v = load(t)
+            if len(v) >= MIN_POINTS:
+                runs[t] = (arm, v)
+            else:
+                print(f"  dropped {t}: {len(v)} points, need {MIN_POINTS}")
+
+    if not runs:
+        print("no runs long enough yet")
+        return
+
+    K = min(len(v) for _, v in runs.values())
+    print(f"\ncommon length K={K} epochs; {len(runs)} runs qualify\n")
+
+    per_arm = {}
+    for tag, (arm, v) in sorted(runs.items()):
+        score = statistics.mean(v[1:K])
+        per_arm.setdefault(arm, []).append(score)
+        print(f"  {tag:<7} {arm:<14} mean(ep 1..{K-1}) = {score:.4f}")
+
+    print()
+    summary = {}
+    for arm, scores in per_arm.items():
+        m = statistics.mean(scores)
+        sd = statistics.stdev(scores) if len(scores) > 1 else float("nan")
+        se = sd / len(scores) ** 0.5 if len(scores) > 1 else float("nan")
+        summary[arm] = (m, se, len(scores))
+        print(f"  {arm:<14} mean={m:.4f}  between-seed SD={sd:.4f}  SE={se:.4f}  n={len(scores)}")
+
+    if len(summary) == 2 and all(s[2] > 1 for s in summary.values()):
+        (a, (ma, sea, _)), (b, (mb, seb, _)) = sorted(summary.items())
+        diff = ma - mb
+        se_diff = (sea ** 2 + seb ** 2) ** 0.5
+        print(f"\n  {a} minus {b} = {diff:+.4f}, SE {se_diff:.4f} -> {abs(diff)/se_diff:.1f} SE")
+        if abs(diff) > 2 * se_diff:
+            print("  VERDICT: difference exceeds 2 SE - anchor strength has a detectable effect")
+        else:
+            print("  VERDICT: no effect detected at this power.")
+            print("  Not the same as no effect: the anchor's role is preventing drift over long")
+            print(f"  training, and this compares only the first {K-1} epochs.")
+
+
+if __name__ == "__main__":
+    main()
