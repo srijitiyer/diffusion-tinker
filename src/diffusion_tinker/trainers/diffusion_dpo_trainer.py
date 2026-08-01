@@ -113,13 +113,22 @@ class DiffusionDPOTrainer:
         t = torch.rand(B, device=device)
         t_bc = t.view(B, 1, 1, 1)
 
-        noise_w = torch.randn_like(winner_latents)
-        noise_l = torch.randn_like(loser_latents)
-        noisy_w = (1.0 - t_bc) * winner_latents + t_bc * noise_w
-        noisy_l = (1.0 - t_bc) * loser_latents + t_bc * noise_l
+        # One noise draw, shared by both branches, the way the reference
+        # implementation does it (it chunks the concatenated batch and repeats
+        # the winner's noise). The loss compares (loss_w_model - loss_w_ref)
+        # against (loss_l_model - loss_l_ref), and sharing the draw lets the two
+        # Monte-Carlo errors partly cancel. On a fixed pair with a perturbed
+        # copy of the model as the policy, the sigmoid argument came out at
+        # std 2.79 shared versus 3.65 independent, and the fraction of samples
+        # pushed past |arg|>8 - where logsigmoid is flat and the gradient is
+        # gone - went from 0.2% to 2.5%. beta is ~5000, so that tail is the part
+        # that matters. The timestep was already shared.
+        noise = torch.randn_like(winner_latents)
+        noisy_w = (1.0 - t_bc) * winner_latents + t_bc * noise
+        noisy_l = (1.0 - t_bc) * loser_latents + t_bc * noise
 
-        v_target_w = noise_w - winner_latents
-        v_target_l = noise_l - loser_latents
+        v_target_w = noise - winner_latents
+        v_target_l = noise - loser_latents
 
         timestep = t * 1000.0
 
