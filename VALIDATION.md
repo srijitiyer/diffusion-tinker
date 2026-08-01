@@ -121,11 +121,33 @@ with everything matched except the regularizer weight: `hb0` (data_beta 0, which
 is FlowGRPO), `hb001` (0.01), `hb005` (0.05), `hb03` (0.3), and `hk001` (FlowGRPO
 reverse-KL beta 0.01). Held-out prompts, fixed eval seed, 12 prompts x 2 samples.
 
-One result is already in and does not need the curves: **all four DDRL arms
-reported an epoch-0 held-out reward of 0.541 +/- 0.071 (n=24), identical to three
-decimals across four independent processes.** That is the eval determinism claim
-tested the hard way - same seed, same held-out set, four separate jobs - rather
-than asserted from the code.
+Two results are already in and do not need the curves.
+
+**Eval determinism, tested the hard way.** All four DDRL arms reported an epoch-0
+held-out reward of 0.541 +/- 0.071 (n=24), identical to three decimals across four
+independent processes - same seed, same held-out set, four separate jobs, rather
+than the claim being asserted from the code. `hb0` and `hb03` also report an
+identical epoch-0 train reward (0.532) with identical per-prompt rewards, so the
+arms are genuinely matched and can only diverge through the regularizer.
+
+**Both regularizer terms demonstrably fire**, which is what makes a beta sweep
+mean anything:
+
+| arm | term | logged |
+|---|---|---|
+| `hk001` FlowGRPO, `kl_beta=0.01` | reverse KL to the frozen reference | `kl_loss` 0.0009, 0.0013 |
+| `hb0` DDRL, `data_beta=0` | forward-KL data term | `data_loss` 0.0000 (off) |
+| `hb03` DDRL, `data_beta=0.3` | forward-KL data term | `data_loss` 0.2775 |
+
+`hb03`'s `total_loss` of 0.0835 reconciles exactly with
+`rl_loss + beta * data_loss = 0.0003 + 0.3 * 0.2775`, so the weight is applied
+rather than only reported.
+
+**Baselines are only comparable within a GPU model.** `h_ddpo` on an a5000 starts
+at 0.499 +/- 0.073 where the atlas29 a6000-Ada arms start at 0.541, same seed and
+same held-out prompts. That is within one SEM, but the four same-node arms agreed
+to three decimals while this differs in the second, so the variable is bf16 GEMM
+kernels differing by architecture. Arms must therefore stay on one node type.
 
 Curves are not yet long enough to compare. On these the SEM is ~0.06-0.08, so
 fewer than about eight points says nothing, and nothing below that bar will be
