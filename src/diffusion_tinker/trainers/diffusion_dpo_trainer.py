@@ -219,6 +219,16 @@ class DiffusionDPOTrainer:
         saw, so it is the DPO analogue of the held-out reward every other trainer
         reports. Chance is 0.5.
 
+        Ties count as half, which matters more than it sounds: at step 0 the LoRA
+        B matrix is zero, so the policy and the reference are the same network and
+        every margin is exactly 0.0. Counting only margin>0 would report 0.000 at
+        step 0 and make the curve appear to start from a floor it never had.
+
+        The mean margin is reported alongside the accuracy. It uses the size of
+        the gap rather than only its sign, so on a held-out set this small it is
+        the number with any power in it - accuracy over ~100 pairs has a standard
+        error near 0.05 all by itself.
+
         Everything that makes the number comparable across evals is pinned: the
         same pairs, the same timesteps, the same noise, every time. The eval
         draws from its own generator so training does not shift the stream.
@@ -231,8 +241,9 @@ class DiffusionDPOTrainer:
         was_training = self.transformer.training
         self.transformer.eval()
 
-        correct = 0
+        correct = 0.0
         total = 0
+        margin_sum = 0.0
         gen = torch.Generator(device="cpu").manual_seed(config.eval_seed)
         # a fixed spread of noise levels rather than random ones, so no eval is
         # luckier than another in where it sampled the schedule
@@ -278,7 +289,8 @@ class DiffusionDPOTrainer:
                         deltas.append(-(l_model - l_ref))
                     margin += deltas[0] - deltas[1]
 
-                correct += (margin > 0).sum().item()
+                correct += (margin > 0).sum().item() + 0.5 * (margin == 0).sum().item()
+                margin_sum += margin.sum().item()
                 total += B
         finally:
             if was_training:
@@ -287,7 +299,9 @@ class DiffusionDPOTrainer:
         if total == 0:
             return None
         acc = correct / total
-        print(f"Eval (step {step}): preference accuracy={acc:.3f} on {total} held-out pairs", flush=True)
+        mean_margin = margin_sum / total
+        print(f"Eval (step {step}): preference accuracy={acc:.3f} "
+              f"mean_margin={mean_margin:+.5f} on {total} held-out pairs", flush=True)
         self._fire_callbacks("on_evaluate", epoch=step, mean_reward=acc)
         return acc
 
