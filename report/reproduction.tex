@@ -149,11 +149,21 @@ The theorem does not have this problem because it maximises over $p_\theta$ as a
 
 \section{FLUX.1-dev}
 
-FLUX.1-dev now runs end to end. Four epochs on a single 48\,GB A6000-Ada at 512px, LoRA rank 16 (26.1\,M trainable parameters): reward $0.312 \to 0.806 \to 0.750$, importance ratio $0.9992 \to 0.9998$, peak memory $36.5$\,GB, exit 0. So the 12\,B model plus a LoRA training step fits with roughly $11.5$\,GB of headroom.
+FLUX.1-dev runs end to end. Four epochs of FlowGRPO at 512px, LoRA rank 16 (26.1\,M trainable): reward $0.312 \to 0.806$, importance ratio $0.9992 \to 0.9998$, peak memory $36.5$\,GB, exit 0. So the 12\,B model plus a LoRA training step fits with roughly $11.5$\,GB of headroom.
 
-The ratio is worth dwelling on. FLUX builds its schedule differently from SD3 (dynamic shifting, which is what the missing \code{mu} crashed on), so a ratio of $0.999$ there says the $\sigma=1$ cap is a property of the SDE rather than a patch tuned to one schedule.
+DDRL with a data anchor also runs there, which matters because that is a different code path: the flow-matching loss needs packed latents, rotary position ids, a guidance scalar and $\text{timestep}=\sigma$ rather than SD3's $\sigma\times1000$. Measured over its first epochs: \code{data\_loss} steady near $0.42$, ratio $0.9993 \to 0.9999$, mean advantage exactly $0$.
 
-Getting there needed two workarounds, neither in the library. At least one A6000-Ada on atlas29 is wedged: it passes the availability check and then blocks forever on the first real allocation, so the preflight now allocates and multiplies under a timeout and a driver resubmits until it lands on a healthy card. And that node reads \code{/atlas} at $4.7$\,MB/s where the login node gets $244$\,MB/s, so streaming the 32\,GB once (\code{real 133m20s}) and letting the model load from page cache takes about a minute, against the roughly 13 hours the \code{safetensors} mmap page-fault path was on course for.
+The ratio is the load-bearing number in both. FLUX builds its schedule differently from SD3 (dynamic shifting, which is what the missing \code{mu} crashed on), so $0.999$ there says the $\sigma=1$ cap is a property of the SDE rather than a patch fitted to one schedule.
+
+One result worth stating plainly: FLUX's untrained OCR is $0.792$ where SD3.5's is $0.300$. FLUX is already good at rendering text, so the task has almost no headroom left, and its held-out curve is flat ($0.792 \to 0.787$) while its training reward climbs $0.167 \to 0.800$. That is the headroom argument applying across models rather than across rewards, and it means OCR is the wrong task on which to demonstrate anything on FLUX even though it is the right one on SD3.5.
+
+\section{Other trainers}
+
+\textbf{DRaFT} had never been measured on held-out data. It overrides \code{train()} and so never called \code{\_evaluate}, meaning its long-standing $5.9 \to 9.6$ was the training reward on the prompts it directly optimises. With a held-out set it gives $5.440 \to 5.768$ across 13 evals. It also could not run at all until two memory defects were fixed: eval was leaving the text encoders on the GPU, undoing the offload DRaFT performs specifically to make room for the reward backward, and prompt pre-encoding pushed every prompt through T5 in one call. Peak memory went from OOM at $23.19$\,GB to $17.7$\,GB.
+
+\textbf{SFT} converges and then overfits. Held-out flow-matching loss on 16 unseen examples at fixed noise and timesteps: $0.21184 \to 0.19742$ at its minimum, then back up to $0.20035$. The training loss falls the whole way, so the turnover is invisible without a held-out set, and it is an argument for the \code{early\_stop\_patience} the config already supports.
+
+\textbf{DiffusionDPO} was recorded as blocked on Pick-a-Pic being gated. That was wrong: both versions 404 now, so accepting the terms would not have helped, and an ungated mirror carries the same schema. What actually blocked it was two defects, a missing $0.5$ in the loss that made the paper's $\beta=5000$ behave like $10000$, and a loader that assumed decoded images where the dataset stores raw jpeg bytes. Over 2000 steps it separates the pair, but one-sidedly: the loser's loss rises in 34/40 logged steps and the implicit reward is positive in 27/40, while the winner's loss falls in only 15/40, which is below chance.
 
 \section{Still open}
 
