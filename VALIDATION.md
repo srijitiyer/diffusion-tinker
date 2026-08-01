@@ -143,6 +143,31 @@ mean anything:
 `rl_loss + beta * data_loss = 0.0003 + 0.3 * 0.2775`, so the weight is applied
 rather than only reported.
 
+**Both new held-out metrics validated on hardware.** DiffusionDPO reports at step
+0, before any update:
+
+```
+Eval (step 0): preference accuracy=0.500 mean_margin=+0.00000 on 100 held-out pairs
+```
+
+`mean_margin` being *exactly* zero is a stronger check than the accuracy. LoRA's
+B matrix is zero-initialized, so the policy and the adapter-disabled reference
+must be the same network and every pair must score an exact tie. Any nonzero
+value there would mean the reference path is leaking - the adapter failing to
+disable, or the two branches seeing different noise. It is the initialization
+test the trainer never had.
+
+SFT's built-in held-out loss (16 examples held back, fixed noise and timesteps):
+
+| step | 0 | 50 | 100 | 150 | 200 | 250 | 300 |
+|---|---|---|---|---|---|---|---|
+| held-out loss | 0.26583 | 0.25435 | 0.25398 | 0.25277 | 0.25291 | 0.25315 | 0.25219 |
+
+Falls then flattens, which is the shape the run-script callback showed
+(0.21184 -> 0.19742). The absolute values differ because the holdout is now the
+dataset tail with an even spread of sigmas rather than whatever the callback
+sampled, so the two are not comparable in level - only in behaviour.
+
 **Baselines are only comparable within a GPU model.** `h_ddpo` on an a5000 starts
 at 0.499 +/- 0.073 where the atlas29 a6000-Ada arms start at 0.541, same seed and
 same held-out prompts. That is within one SEM, but the four same-node arms agreed
