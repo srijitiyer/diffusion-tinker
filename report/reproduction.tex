@@ -3,6 +3,7 @@
 \usepackage[margin=1in]{geometry}
 \usepackage{booktabs}
 \usepackage{amsmath}
+\usepackage{amssymb}   % \mathbb, used in the monotonic-transform section
 \usepackage{graphicx}
 \usepackage{xcolor}
 \usepackage{titlesec}
@@ -161,13 +162,40 @@ One result worth stating plainly: FLUX's untrained OCR is $0.792$ where SD3.5's 
 
 \textbf{DRaFT} had never been measured on held-out data. It overrides \code{train()} and so never called \code{\_evaluate}, meaning its long-standing $5.9 \to 9.6$ was the training reward on the prompts it directly optimises. With a held-out set it gives $5.440 \to 5.768$ across 13 evals. It also could not run at all until two memory defects were fixed: eval was leaving the text encoders on the GPU, undoing the offload DRaFT performs specifically to make room for the reward backward, and prompt pre-encoding pushed every prompt through T5 in one call. Peak memory went from OOM at $23.19$\,GB to $17.7$\,GB.
 
-\textbf{SFT} converges and then overfits. Held-out flow-matching loss on 16 unseen examples at fixed noise and timesteps: $0.21184 \to 0.19742$ at its minimum, then back up to $0.20035$. The training loss falls the whole way, so the turnover is invisible without a held-out set, and it is an argument for the \code{early\_stop\_patience} the config already supports.
+\textbf{SFT} converges and then overfits. Held-out flow-matching loss on 16 unseen examples at fixed noise and timesteps: $0.21184 \to 0.19742$ at its minimum, then back up to $0.20035$. The training loss falls the whole way, so the turnover is invisible without a held-out set, and it is an argument for the \code{early\_stop\_patience} the config already supports. That measurement came from a callback defined in a cluster run script, so it existed for that one run and for nobody calling \code{SFTTrainer} directly; it is now inside the trainer, and a fresh run reproduces the shape ($0.26583 \to 0.25219$, flat from step 150).
 
 \textbf{DiffusionDPO} was recorded as blocked on Pick-a-Pic being gated. That was wrong: both versions 404 now, so accepting the terms would not have helped, and an ungated mirror carries the same schema. What actually blocked it was two defects, a missing $0.5$ in the loss that made the paper's $\beta=5000$ behave like $10000$, and a loader that assumed decoded images where the dataset stores raw jpeg bytes. Over 2000 steps it separates the pair, but one-sidedly: the loser's loss rises in 34/40 logged steps and the implicit reward is positive in 27/40, while the winner's loss falls in only 15/40, which is below chance.
 
+It also had no held-out metric of any kind, only its own training loss --- the same failure as DRaFT. It now reports preference accuracy on unseen pairs, the fraction where the implicit reward ranks the winner higher. At step 0 that reads exactly $0.500$ with a mean margin of exactly $0.00000$, which is the initialisation check the trainer never had: LoRA's $B$ is zero, so the policy and the adapter-disabled reference must be the same network and every pair must tie. Over the run it peaks at $0.610$ and drifts back to $0.540$, mean $0.553$. That looks significant if you average ten evals and quote a standard error of $0.016$, and it is not: the 100 held-out pairs are fixed across evals by design, so the binomial error from having only 100 of them never averages down. The right error is $0.05$, putting the peak at about 2\,SE and the mean at 1. Two further defects surfaced in the same pass --- it drew independent noise for winner and loser where the reference shares one draw, and it still checkpointed the entire transformer.
+
+\section{Anchor strength: what a sweep can and cannot show}
+
+Haotian asked for $\beta = 0$, $0.01$ and upward. An earlier grid did sweep both regularizer weights, so the sweep existed --- but it passed no held-out prompts and no eval seed, so it scored the first four \emph{training} prompts, and it ran on counting 2--4 objects where the base model is at $0.792$ and every arm saturates at $1.000$. A sweep whose arms all reach the ceiling measures the ceiling.
+
+The replacement runs on counting 6--9 objects, the one task with measured headroom, everything matched but the regularizer weight. Two things came out of it before any curve was long enough to read. All four arms reported an epoch-0 held-out reward of $0.541 \pm 0.071$ ($n{=}24$), identical to three decimals across four independent processes, which is the eval-determinism claim tested rather than asserted. And both regularizer terms demonstrably fire: \code{kl\_loss} $0.0009$ on the FlowGRPO reverse-KL arm, \code{data\_loss} $0.0000$ at $\beta{=}0$ against $0.2775$ at $\beta{=}0.3$, with the reported total reconciling exactly as $\text{rl} + \beta \cdot \text{data}$.
+
+The curves themselves say nothing, and one accident showed why. The cluster killed one arm partway and it was resubmitted, producing two complete runs of the \emph{identical} configuration at the same seed:
+
+\begin{center}
+\begin{tabular}{lcccc}
+\toprule
+\code{hb0} ($\beta{=}0$) & $n$ & peak & last 5 & mean after ep.\ 0 \\
+\midrule
+first run & 9 & 0.621 & 0.586 & 0.575 \\
+rerun & 15 & 0.562 & 0.551 & 0.546 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent The two differ in mean by $0.029$. The spread across the four different $\beta$ arms is also $0.029$. Run-to-run variation at a fixed configuration is the same size as the variation the sweep was built to detect, so depending on which run happened to survive, $\beta{=}0$ is either the best arm or tied for the worst. Every point of every arm lies inside one standard error of the untrained baseline.
+
+Runs at one seed diverge because bf16 GEMM nondeterminism across processes is amplified by the RL feedback loop --- already known for a single epoch, now measured across a whole run. Since the eval latents are pinned and identical across runs, that divergence is the policy and not the measurement, so raising the eval sample count would not touch it. Replicate seeds are the only lever. Resolving a $0.03$ effect needs roughly four seeds per arm, which is what is running now: $\beta \in \{0, 0.3\}$ at four seeds each, dropping the middle values on the grounds that if the endpoints do not separate, $0.01$ and $0.05$ will not.
+
+This is a negative result about the experiment as much as about $\beta$. It does not say the anchor is useless --- its job is to prevent drift over long training, and ten to fifteen epochs is early for drift --- only that this design cannot tell the arms apart, and that the previous design could not have either.
+
 \section{Still open}
 
-DiffusionDPO's re-run is still blocked by Pick-a-Pic being gated on Hugging Face. The counting, CLIP-score, PickScore and HPS rewards all need re-measuring on fixed code, since their previous numbers came from rollouts that carried no signal. Two deliberate deviations are worth remembering: the log-prob is mean-reduced rather than summed, which is what makes \code{clip\_range}$=10^{-3}$ sane, and the counting reward is graded where GenEval's is binary, so those numbers are not directly comparable.
+The counting, CLIP-score, PickScore and HPS rewards all need re-measuring on fixed code, since their previous numbers came from rollouts that carried no signal. (An earlier version of this section said DiffusionDPO was still blocked on Pick-a-Pic gating, three lines after the paragraph explaining that it is not. It runs.) Two deliberate deviations are worth remembering: the log-prob is mean-reduced rather than summed, which is what makes \code{clip\_range}$=10^{-3}$ sane, and the counting reward is graded where GenEval's is binary, so those numbers are not directly comparable.
 
 \vspace{0.5em}
 \noindent Code, tests, and the full audit: \url{https://github.com/srijitiyer/diffusion-tinker}.
