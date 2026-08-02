@@ -209,31 +209,33 @@ more of its peak. The forward-KL data term exists to hold the policy near the
 data manifold over long training, and over these twelve epochs it is associated
 with more degradation, not less.
 
-**A confound that may explain it entirely.** In the same cohort, the anchored arm
-resumed more often per epoch than the unanchored one:
+**An asymmetry in resume rate, with the mechanism I proposed for it withdrawn.**
+In the same cohort the anchored arm resumed more often per epoch:
 
 | arm | resumes/epoch | n |
 |---|---|---|
 | data_beta 0 | 0.209 (SD 0.071) | 4 |
 | data_beta 0.3 | 0.311 (SD 0.020) | 3 |
 
-Difference +0.103 at **2.7 SE** - a larger effect than the 2.2 SE drift result it
-could account for. The mechanism is direct: resume state is written after each
-epoch, so a crash mid-epoch loses that epoch's training and the resume repeats
-it. The model sees part of that epoch twice. Restoring the RNG made the draws
-identical but does nothing about how many times an epoch is partially replayed,
-so this survived the fix that was supposed to remove resume as a variable.
+Difference +0.103 at 2.7 SE. I recorded this as a confound that might explain the
+drift result entirely, on the reasoning that a crash mid-epoch makes the resume
+repeat that epoch's training so the model sees part of it twice. **That reasoning
+was wrong and the claim is withdrawn.** The state is written after an epoch's
+training with `next_epoch = epoch + 1`, so a crash during epoch N discards N's
+partial updates - they were only ever in memory - and the resume restores the end
+of N-1 and redoes N from its correct starting point with the RNG restored.
+Nothing is trained twice. I asserted a mechanism without reading the code path
+that implements it, in a file I had written that same day.
 
-Whether more partial-epoch repetition should worsen late-training held-out reward
-is not obvious, so this is a candidate rather than a demonstration - and it is
-post-hoc, found by going looking after the drift result appeared. But it is the
-same shape of reasoning that produced the crash-rate signal which then failed
-replication, so it is recorded with the same suspicion. The replication cohort
-can test it directly: if the arms there resume at similar rates and the drift
-difference persists, the confound is ruled out; if resume rates differ again and
-track the drift, it is the better explanation.
+What survives is a real but unexplained asymmetry: the anchored arm crashes more,
+and no route from crash count to held-out drift has been established. Resume is
+transparent by construction here, up to bf16 nondeterminism which both arms carry
+equally. The declared test in `report/analyze_resume_confound.py` still runs,
+because an unexplained asymmetry that tracks the outcome would be worth knowing
+about even without a mechanism - but it is no longer a candidate explanation, it
+is a check for one.
 
-Four reasons not to treat this as established:
+Four reasons not to treat this as established:Four reasons not to treat this as established:
 
 - **Two statistics were pre-registered**, so under the null the chance of one
   exceeding 2 SE is 0.089, not 0.045. A single 2.2 SE result across two tests is

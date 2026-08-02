@@ -2,11 +2,17 @@
 
 The drift result (anchored arm degrades more, 2.2 SE) has a candidate explanation
 that is not the anchor: in that cohort the anchored arm resumed 0.311 times per
-epoch against 0.209, a difference of 2.7 SE. A crash mid-epoch loses that epoch's
-training and the resume repeats it, so the model sees part of that epoch twice.
-Restoring the RNG made the draws identical and does nothing about how often an
-epoch is partially replayed, so the fix that was supposed to remove resume as a
-variable did not remove this channel.
+epoch against 0.209, a difference of 2.7 SE. The mechanism first proposed for this - that a crash
+mid-epoch makes the resume repeat that epoch's training - was WRONG and is
+withdrawn. State is written after training with next_epoch = epoch + 1, so a
+crash during epoch N discards N's partial updates and the resume redoes N from
+the end of N-1 with the RNG restored. Nothing is trained twice; resume is
+transparent up to bf16 nondeterminism, which both arms carry equally.
+
+So this is no longer a candidate explanation with a story behind it. It is a
+check on an unexplained asymmetry: the anchored arm crashes more, and if that
+tracks the drift difference across an independent cohort it would be worth
+knowing even without a mechanism.
 
 That observation is post-hoc - it was found by going looking after the drift
 result appeared, which is the same route that produced the crash-rate signal that
