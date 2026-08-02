@@ -463,6 +463,25 @@ way every time" is not evidence of determinism unless the alternative was
 actually ruled out. The claim was retracted within the hour; the drift analysis's
 exclusion note went with it.
 
+**The anchor costs about 24% throughput, which explains a pattern misattributed
+twice.** Across three cohorts the data_beta=0 arms consistently accumulated epochs
+faster, and this was attributed first to nothing (a single noisy pair of runs
+suggested no pace difference) and then to the crash-rate signal below. Measured
+over 81 GPU-hours in the powered cohort:
+
+| arm | epochs | GPU-hours | epochs/GPU-hour |
+|---|---|---|---|
+| `data_beta`=0 | 101 | 47.6 | 2.12 |
+| `data_beta`=0.3 | 55 | 33.8 | 1.62 |
+
+Crash counts in the same cohort were 18 for data_beta=0 against 15 for
+data_beta=0.3 - the opposite direction from the earlier signal, so crashes explain
+neither the lag nor themselves. The cause is ordinary: `data_beta > 0` adds a
+forward and backward pass on anchor latents at every timestep, so an epoch is
+simply more work. Worth knowing as a planning number - turning the anchor on costs
+roughly a quarter of throughput - and worth remembering as an instance of
+reaching for an exotic explanation twice before measuring the obvious one.
+
 **The configuration-dependent signal did not replicate.** The finding below was
 recorded post-hoc and flagged as needing a declared test. That test was written
 before the replication cohort's crash counts were read, with exposure in
