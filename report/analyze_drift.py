@@ -14,8 +14,11 @@ only thing needed is for them to get longer.
 Fixed in advance:
 
   - The unit is a run, as before. Seeds are the replicates.
-  - Each run contributes ONE number, its DRIFT: the mean over the last third of
-    its epochs minus the mean over the first third, both excluding epoch 0.
+  - Each run contributes TWO numbers, both over epochs 1..K-1: DRIFT, the late
+    third mean minus the early third mean, and GIVEBACK, the peak minus the
+    final value. See `giveback` for why one is not enough - the second was added
+    before any clean run had a point, after the first was shown blind to the
+    peak-then-collapse shape.
     Negative means the run gave back what it gained. This is the quantity the
     anchor should act on, and it is the same shape as the give-back already
     measured on SFT (held-out minimum 0.19742, ending 0.20035) and on FLUX.
@@ -105,6 +108,30 @@ def drift(v, K):
     return statistics.mean(body[-third:]) - statistics.mean(body[:third])
 
 
+def giveback(v, K):
+    """Peak minus final, over epochs 1..K-1. Positive means it gave gain back.
+
+    Added Aug 2 2026, BEFORE any clean run had produced a point, after testing
+    `drift` against synthetic curves of known shape. That test showed `drift`
+    returns exactly 0.0000 for a curve that rises to a peak and then gives all of
+    it back, because the late and early thirds both sit low - which is the exact
+    shape SFT showed (held-out minimum 0.19742, ending 0.20035) and the exact
+    thing the anchor is supposed to prevent. The registered statistic was blind
+    to the failure mode it was written for.
+
+    Peak-minus-final is upward biased on any noisy curve, since a maximum is a
+    maximum of noise too. That bias is identical across arms, so it cancels in
+    the between-arm difference this reports; it would not be safe to read a
+    single arm's value as an absolute amount of give-back.
+
+    Both statistics are reported. `drift` catches a steady decline that never
+    peaked; `giveback` catches a rise that was surrendered. They fail in
+    different directions and neither alone covers the question.
+    """
+    body = v[1:K]
+    return max(body) - body[-1]
+
+
 def main():
     runs = {}
     for arm, tags in ARMS.items():
@@ -122,30 +149,32 @@ def main():
     K = min(len(v) for _, v in runs.values())
     print(f"\ncommon length K={K}; {len(runs)} runs qualify\n")
 
-    per_arm = {}
-    for tag, (arm, v) in sorted(runs.items()):
-        d = drift(v, K)
-        per_arm.setdefault(arm, []).append(d)
-        print(f"  {tag:<7} {arm:<14} drift = {d:+.4f}")
+    for label, fn in (("drift", drift), ("giveback", giveback)):
+        per_arm = {}
+        print(f"--- {label} ---")
+        for tag, (arm, v) in sorted(runs.items()):
+            d = fn(v, K)
+            per_arm.setdefault(arm, []).append(d)
+            print(f"  {tag:<7} {arm:<14} {label} = {d:+.4f}")
 
-    print()
-    summary = {}
-    for arm, ds in per_arm.items():
-        m = statistics.mean(ds)
-        sd = statistics.stdev(ds) if len(ds) > 1 else float("nan")
-        se = sd / len(ds) ** 0.5 if len(ds) > 1 else float("nan")
-        summary[arm] = (m, se, len(ds))
-        print(f"  {arm:<14} mean drift={m:+.4f}  SD={sd:.4f}  SE={se:.4f}  n={len(ds)}")
+        summary = {}
+        for arm, ds in per_arm.items():
+            m = statistics.mean(ds)
+            sd = statistics.stdev(ds) if len(ds) > 1 else float("nan")
+            se = sd / len(ds) ** 0.5 if len(ds) > 1 else float("nan")
+            summary[arm] = (m, se, len(ds))
+            print(f"  {arm:<14} mean={m:+.4f}  SD={sd:.4f}  SE={se:.4f}  n={len(ds)}")
 
-    if len(summary) == 2 and all(s[2] > 1 for s in summary.values()):
-        (a, (ma, sea, _)), (b, (mb, seb, _)) = sorted(summary.items())
-        diff = ma - mb
-        se_diff = (sea ** 2 + seb ** 2) ** 0.5
-        print(f"\n  {a} minus {b} = {diff:+.4f}, SE {se_diff:.4f} -> {abs(diff)/se_diff:.1f} SE")
-        if abs(diff) > 2 * se_diff:
-            print("  VERDICT: the arms drift differently - the anchor acts where it was meant to")
-        else:
-            print("  VERDICT: no difference in drift detected at this power.")
+        if len(summary) == 2 and all(x[2] > 1 for x in summary.values()):
+            (a, (ma, sea, _)), (b, (mb, seb, _)) = sorted(summary.items())
+            diff = ma - mb
+            se_diff = (sea ** 2 + seb ** 2) ** 0.5
+            print(f"  {a} minus {b} = {diff:+.4f}, SE {se_diff:.4f} -> {abs(diff)/se_diff:.1f} SE")
+            if abs(diff) > 2 * se_diff:
+                print(f"  VERDICT ({label}): the arms differ - the anchor acts where it was meant to")
+            else:
+                print(f"  VERDICT ({label}): no difference detected at this power.")
+        print()
 
 
 if __name__ == "__main__":
