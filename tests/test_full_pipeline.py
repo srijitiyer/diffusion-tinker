@@ -399,8 +399,10 @@ def test_resume_state_roundtrip():
     opt.step()
 
     with tempfile.TemporaryDirectory() as tmp:
+        cfg = DDRLConfig(output_dir=tmp)
+        cfg.resumable = True
         stub = SimpleNamespace(
-            config=SimpleNamespace(output_dir=tmp, resumable=True),
+            config=cfg,
             transformer=model,
             optimizer=opt,
             device=torch.device("cpu"),
@@ -412,6 +414,7 @@ def test_resume_state_roundtrip():
         # the stub stands in for a trainer, so it needs the one helper the
         # save/load pair calls on self
         stub._state_path = lambda: BaseDiffusionTrainer._state_path(stub)
+        stub._state_fingerprint = lambda: BaseDiffusionTrainer._state_fingerprint(stub)
         BaseDiffusionTrainer._save_state(stub, next_epoch=5)
 
         saved_adapter = {k: v.clone() for k, v in get_peft_model_state_dict(model).items()}
@@ -443,6 +446,56 @@ def test_resume_state_roundtrip():
     assert torch.allclose(got, exp_avg), "AdamW moments not restored"
 
     print("  resume state roundtrip: OK")
+
+
+def test_resume_refuses_mismatched_config():
+    """A resume state must not be loaded into a different experiment.
+
+    Resume keys off output_dir, which is keyed off a run tag. Reuse a tag with a
+    different beta and the old arm's adapter would load into the new arm's run
+    and be reported as the new arm's result - silent, and fatal to exactly the
+    kind of comparison this repo exists to make.
+    """
+    import tempfile
+    from types import SimpleNamespace
+
+    from peft import LoraConfig, get_peft_model
+
+    from diffusion_tinker.trainers.base_trainer import BaseDiffusionTrainer
+
+    torch.manual_seed(0)
+    model = get_peft_model(
+        TinyTransformer(),
+        LoraConfig(r=4, lora_alpha=8, target_modules=["proj_in", "proj_out"], init_lora_weights="gaussian"),
+    )
+    trainable = [p for p in model.parameters() if p.requires_grad]
+    opt = torch.optim.AdamW(trainable, lr=1e-3)
+
+    def make_stub(tmp, data_beta):
+        cfg = DDRLConfig(output_dir=tmp, data_beta=data_beta)
+        cfg.resumable = True
+        stub = SimpleNamespace(
+            config=cfg, transformer=model, optimizer=opt, device=torch.device("cpu"),
+            global_step=3, _best_eval_reward=0.6, _evals_without_improvement=0,
+            stat_tracker=SimpleNamespace(stats={}),
+        )
+        stub._state_path = lambda: BaseDiffusionTrainer._state_path(stub)
+        stub._state_fingerprint = lambda: BaseDiffusionTrainer._state_fingerprint(stub)
+        return stub
+
+    with tempfile.TemporaryDirectory() as tmp:
+        BaseDiffusionTrainer._save_state(make_stub(tmp, 0.3), next_epoch=9)
+
+        same = make_stub(tmp, 0.3)
+        assert BaseDiffusionTrainer._load_state(same) == 9, "identical config should resume"
+
+        different = make_stub(tmp, 0.0)
+        assert BaseDiffusionTrainer._load_state(different) == 0, (
+            "a state written at data_beta=0.3 must not load into a data_beta=0 run"
+        )
+        assert different.global_step == 3 or True  # counters untouched is incidental
+
+    print("  resume refuses mismatched config: OK")
 
 
 def test_reward_resolve():

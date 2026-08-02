@@ -347,11 +347,39 @@ class BaseDiffusionTrainer(ABC):
                 self._save_state(epoch + 1)
 
         self._save_checkpoint(self.config.num_epochs)
+        # The run finished, so the state is spent. Left behind, the next start on
+        # this tag would resume at num_epochs, fall straight out of the loop, and
+        # report success having trained nothing.
+        state_path = self._state_path()
+        if state_path.exists():
+            state_path.unlink()
         self._fire_callbacks("on_train_end")
         print("Training complete.")
 
     def _state_path(self) -> Path:
         return Path(self.config.output_dir) / "resume_state.pt"
+
+    def _state_fingerprint(self) -> str:
+        """Identity of the experiment this state belongs to.
+
+        Resume keys off output_dir, and output_dir is keyed off a run tag. Reusing
+        a tag with different settings would otherwise load one experiment's
+        adapter into another's run and report the result as the new arm - silent,
+        and fatal to a comparison. Only fields that change what is being measured
+        are included; things like eval_every or output paths are not.
+        """
+        c = self.config
+        parts = [
+            type(c).__name__,
+            f"lr={c.learning_rate}", f"rank={c.lora_rank}", f"seed={c.seed}",
+            f"group={c.num_samples_per_prompt}", f"steps={c.num_inference_steps}",
+            f"noise={c.noise_level}", f"res={c.resolution}", f"clip={c.clip_range}",
+            f"tbs={c.train_batch_size}", f"ppe={c.prompts_per_epoch}",
+            f"guid={c.guidance_scale}",
+            f"beta={getattr(c, 'data_beta', None)}/{getattr(c, 'kl_beta', None)}",
+            f"mono={getattr(c, 'use_monotonic_transform', None)}",
+        ]
+        return "|".join(parts)
 
     def _save_state(self, next_epoch: int):
         """Everything needed to continue as if the crash had not happened.
@@ -373,6 +401,7 @@ class BaseDiffusionTrainer(ABC):
                 "best_eval_reward": self._best_eval_reward,
                 "evals_without_improvement": self._evals_without_improvement,
                 "stat_tracker": getattr(self.stat_tracker, "stats", None),
+                "fingerprint": self._state_fingerprint(),
             },
             tmp,
         )
@@ -389,6 +418,17 @@ class BaseDiffusionTrainer(ABC):
             state = torch.load(path, map_location=self.device, weights_only=False)
         except Exception as exc:
             print(f"Resume state at {path} is unreadable ({exc}); starting fresh")
+            return 0
+
+        saved_fp = state.get("fingerprint")
+        now_fp = self._state_fingerprint()
+        if saved_fp is not None and saved_fp != now_fp:
+            print(
+                f"Refusing to resume: {path} was written by a different configuration.\n"
+                f"  saved: {saved_fp}\n  now:   {now_fp}\n"
+                "Starting fresh. Delete the state file if the reuse is intentional.",
+                flush=True,
+            )
             return 0
 
         set_peft_model_state_dict(self.transformer, state["adapter"])
