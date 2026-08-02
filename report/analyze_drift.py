@@ -51,7 +51,11 @@ import csv
 import os
 import statistics
 
-CSV_DIR = os.path.join(os.path.dirname(__file__), "seeded_csv")
+# Its own directory, not the level experiment's. The fetch that refreshes curves
+# wipes and rebuilds whatever directory it targets, so sharing one would delete
+# the level experiment's committed record every time the drift runs are polled -
+# which it did once before this was split.
+CSV_DIR = os.path.join(os.path.dirname(__file__), "drift_csv")
 
 # New tags for the clean run, not the b0/b3 ones the level comparison used. A
 # rename rather than a filter: the analysis picks the longest run per tag across
