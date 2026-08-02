@@ -34,7 +34,8 @@ If the arms differ here and not in the level comparison, that is the anchor doin
 its job in the place it was designed to work rather than in the place that was
 convenient to measure.
 
-Provenance note. The runs feeding this were restarted clean on Aug 2 2026. The
+Provenance note. The runs feeding this are the `d0*`/`d3*` tags, started clean on
+Aug 2 2026. The
 earlier curves (archived under repro_csv/premixed) were grown across a change in
 how resume handled the RNG: before the fix a resumed run drew different rollout
 noise than an uninterrupted one, and because the data_beta=0.3 arms crash roughly
@@ -49,9 +50,14 @@ import statistics
 
 CSV_DIR = os.path.join(os.path.dirname(__file__), "seeded_csv")
 
+# New tags for the clean run, not the b0/b3 ones the level comparison used. A
+# rename rather than a filter: the analysis picks the longest run per tag across
+# rotated files, so as long as the old curves share a tag prefix they can be
+# selected by accident no matter what a docstring says. Different tags make the
+# contamination structurally impossible instead of merely cleaned up.
 ARMS = {
-    "data_beta=0": ["b0s42", "b0s43", "b0s44", "b0s45"],
-    "data_beta=0.3": ["b3s42", "b3s43", "b3s44", "b3s45"],
+    "data_beta=0": ["d0s42", "d0s43", "d0s44", "d0s45"],
+    "data_beta=0.3": ["d3s42", "d3s43", "d3s44", "d3s45"],
 }
 DRIFT_MIN_K = 12
 
