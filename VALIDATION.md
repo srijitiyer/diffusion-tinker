@@ -107,7 +107,21 @@ FLUX also could not run DDRL with an anchor or SFT at all, because
 `compute_flow_matching_loss` spoke only SD3 (no `img_ids`/`txt_ids`/`guidance`,
 unpacked latents, `timestep = sigma*1000`). Fixed and shape-verified.
 
-## Beta sweep (in flight)
+## Anchor strength (beta)
+
+Two questions, answered separately, and the order they are written in below is the
+order they were asked rather than the order they matter:
+
+1. **Does beta change held-out reward?** No, over six epochs, bounded under ~0.03.
+   Settled by a four-seeds-per-arm design after a first attempt was shown
+   incapable of detecting anything. Sections: *Result: beta does not separate*,
+   *Seeded design: final*.
+2. **Does beta change degradation over a longer horizon?** A 2.2 SE signal that
+   runs *against* the anchor, with four named weaknesses and a replication in
+   flight. Section: *Drift result*.
+
+The first is finished. The second is not, and is written up so that a reader can
+see exactly what would overturn it.
 
 Haotian asked for beta 0, 0.01 and upward. An earlier grid (`t_grid2.py`, the
 `c2_*` curves) did sweep both `kl_beta` and `data_beta`, so the sweep existed -
@@ -260,7 +274,7 @@ opposite way, so the message would have described the finding backwards. It was
 corrected after seeing the result; no threshold, statistic or inclusion rule
 changed.
 
-### Result: beta does not separate within 10 epochs
+### Result: the first design could not have separated anything
 
 `report/beta_sweep.png` (`report/make_beta_sweep.py`, curves in
 `report/beta_csv/`). Longest surviving run per arm, since atlas29 killed and
