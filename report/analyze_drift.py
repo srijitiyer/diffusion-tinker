@@ -37,6 +37,14 @@ If the arms differ here and not in the level comparison, that is the anchor doin
 its job in the place it was designed to work rather than in the place that was
 convenient to measure.
 
+Read point, declared before looking. The level comparison had no defined moment
+to be read, so its number moved every time runs grew and I had to record that as
+a gap. This one is read ONCE, when every run that can qualify has qualified -
+that is four seeds at data_beta=0 and three at data_beta=0.3, `d3s43` being
+permanently broken (below). At the moment of writing this the counts were 4 and
+2, with `d3s44` one epoch short; that state was not analysed. Re-reads after the
+declared point are reported as such, not substituted for it.
+
 Known exclusion. `d3s43` (data_beta=0.3, seed 43) segfaults reproducibly in the
 backward pass of epoch 0 - five consecutive attempts, all inside gradient-
 checkpoint recompute at the same line, never reaching the first state save. Same
