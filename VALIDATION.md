@@ -266,6 +266,29 @@ roughly 2 SE. All five arms that have started report an epoch-0 held-out reward 
 only training: eval is driven by `eval_seed` and must not move with it. The middle betas are dropped: if 0 and 0.3 do not separate, 0.01 and
 0.05 will not.
 
+#### Interim result from the seeded design
+
+The pre-registered script (`report/analyze_seeded.py`, committed before the runs
+finished) first became runnable at 3 seeds for beta=0 and 2 for beta=0.3, common
+length 6 epochs:
+
+| arm | mean | between-seed SD | n |
+|---|---|---|---|
+| data_beta 0 | 0.5477 | 0.0196 | 3 |
+| data_beta 0.3 | 0.5621 | 0.0161 | 2 |
+
+Difference **-0.0144 with SE 0.0161, i.e. 0.9 SE. No effect detected at this
+power.** Still interim: the design calls for four seeds per arm and crashes have
+delivered three and two, so the same script gets rerun unchanged when the rest
+land.
+
+Two things are worth taking from it already. The design was sized on a run-to-run
+SD of 0.021 estimated from one accidental replicate pair, and the seeds measure
+0.0196 and 0.0161 directly, so that estimate holds and the SE on the difference
+can be trusted. And beta=0.3 comes out nominally *higher* here, the opposite sign
+to what the first sweep's surviving beta=0 run implied - which is the whole point,
+since at 0.9 SE the sign is decided by which runs happen to exist.
+
 What this does **not** say. It does not say the anchor is useless - its job is to
 stop drift over long training, and ten epochs is early for drift to appear. It
 does not say the arms are equal, only that this experiment cannot tell them
