@@ -205,7 +205,7 @@ same held-out prompts. That is within one SEM, but the four same-node arms agree
 to three decimals while this differs in the second, so the variable is bf16 GEMM
 kernels differing by architecture. Arms must therefore stay on one node type.
 
-### Drift: the original result did NOT replicate, and the replication points the other way
+### Drift: neither the original result nor its apparent reversal survives
 
 Read once at the declared point on an independent cohort (seeds 46-49, four per
 arm, `report/driftrep_csv/`, common window K=14, `r3s48` short at 11 epochs):
@@ -219,7 +219,30 @@ The pre-registered criterion was explicit: *an opposite sign, at any strength,
 means the first result does not stand*. Drift's sign flipped, so **the 2.2 SE
 finding that the anchor makes degradation worse is withdrawn.**
 
-What replaces it is stronger and points the opposite way. `giveback` - the
+**And the replacement did not survive one more run.** The read above was taken at
+seven qualifying runs under the stall clause of the declared read point. The
+eighth run qualified minutes later, which shortened the common window from K=14
+to K=12, and the picture changed completely:
+
+| read | drift | giveback |
+|---|---|---|
+| 7 runs, K=14 (declared point) | 0.5 SE | **4.2 SE** |
+| 8 runs, K=12 (secondary) | 0.3 SE | **0.4 SE** |
+
+A 4.2 SE result became 0.4 SE by including one additional run. It was an artifact
+of the window, not a property of the anchor.
+
+**This is a mistake I had already diagnosed and repeated anyway.** After the level
+experiment I wrote that deriving K from the common run length makes the result a
+moving target and that "a future design should fix the epoch window in advance
+instead of deriving it from whatever the runs deliver." I then pre-registered the
+drift analysis with common-length truncation regardless. Having identified the
+flaw in writing did not stop me building on it, and the cost was reporting a
+4.2 SE finding that one more run erased.
+
+So nothing below should be read as a claim about the anchor. Kept for provenance:
+
+What appeared to replace it, before the eighth run. `giveback` - the
 statistic built specifically for the peak-then-surrender shape, and the one that
 missed threshold originally - now separates at **4.2 SE**, and the *unanchored*
 arm gives back more of its peak (0.0660 against 0.0342). On this cohort the
@@ -242,13 +265,22 @@ replicate while resume rates do not differ is the case where the original 2.2 SE
 was noise - which two registered statistics at an 0.089 effective bar always made
 plausible.
 
-**Where this leaves the anchor.** One cohort said it hurts at 2.2 SE, an
-independent cohort says it helps at 4.2 SE on the better-suited statistic and
-finds nothing on the other. Neither is a settled claim about the anchor; what is
-settled is that a single 2 SE result on one cohort of three-to-four seeds does not
-survive replication here, in either direction. A third cohort would be needed
-before saying anything about the anchor with confidence, and the honest present
-status is that the six-epoch null remains the only firm result.
+**Where this leaves the anchor: nowhere, and that is the result.** Three readings
+were taken. The original cohort said the anchor hurts at 2.2 SE. The replication
+at seven runs said it helps at 4.2 SE. The same replication at eight runs said
+nothing, twice over. Every apparent effect dissolved under either an independent
+cohort or a single extra run.
+
+The honest conclusion is not about beta at all. It is that this measurement -
+four seeds per arm, a window derived from run length, curves at ~0.07 SEM on a
+node that kills jobs hourly - cannot resolve differences of the size being looked
+for, and will manufacture 2-to-4 SE results in either direction if read at a
+moment of its choosing. The six-epoch null stands as the only firm result in the
+beta work, and it stands partly because it was read once at a fixed design point
+and was robust across four re-reads.
+
+What a real answer would need: the epoch window fixed in advance rather than
+derived, many more seeds than four, and a cluster that lets a run finish.
 
 ### Superseded: the original drift result (over 12 epochs the anchored arm degrades more)
 
