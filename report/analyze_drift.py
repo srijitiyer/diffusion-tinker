@@ -218,7 +218,15 @@ def main():
                 # which is disclosed in VALIDATION.md - it changes no threshold,
                 # statistic or inclusion rule, only a sentence that would have
                 # described the finding backwards.
-                worse = (a == "data_beta=0") == (diff > 0)
+                # The two statistics have opposite polarity: for `drift`, higher
+                # means less decline and is better; for `giveback`, higher means
+                # more of the peak was surrendered and is worse. The original
+                # version of this line assumed one polarity and printed the
+                # replication's giveback result exactly backwards. Corrected and
+                # disclosed in VALIDATION.md.
+                higher_is_better = (label == "drift")
+                anchored_higher = (diff < 0) if a == "data_beta=0" else (diff > 0)
+                worse = anchored_higher != higher_is_better
                 if worse:
                     print(f"  VERDICT ({label}): the arms differ, and the ANCHORED arm is worse - "
                           "opposite to the anchor's purpose")

@@ -205,7 +205,52 @@ same held-out prompts. That is within one SEM, but the four same-node arms agree
 to three decimals while this differs in the second, so the variable is bf16 GEMM
 kernels differing by architecture. Arms must therefore stay on one node type.
 
-### Drift result: over 12 epochs the anchored arm degrades more
+### Drift: the original result did NOT replicate, and the replication points the other way
+
+Read once at the declared point on an independent cohort (seeds 46-49, four per
+arm, `report/driftrep_csv/`, common window K=14, `r3s48` short at 11 epochs):
+
+| statistic | data_beta 0 | data_beta 0.3 | difference | | vs original |
+|---|---|---|---|---|---|
+| drift | +0.0080 | +0.0201 | -0.0121, SE 0.0231 | 0.5 SE | **sign flipped** |
+| giveback | +0.0660 | +0.0342 | +0.0317, SE 0.0075 | **4.2 SE** | sign flipped |
+
+The pre-registered criterion was explicit: *an opposite sign, at any strength,
+means the first result does not stand*. Drift's sign flipped, so **the 2.2 SE
+finding that the anchor makes degradation worse is withdrawn.**
+
+What replaces it is stronger and points the opposite way. `giveback` - the
+statistic built specifically for the peak-then-surrender shape, and the one that
+missed threshold originally - now separates at **4.2 SE**, and the *unanchored*
+arm gives back more of its peak (0.0660 against 0.0342). On this cohort the
+anchor reduces late-training give-back by about 0.032, which is what a data
+anchor is supposed to do.
+
+**A bug in my own reporting, disclosed.** The verdict line printed "the ANCHORED
+arm is worse" for this result. The two statistics have opposite polarity - higher
+`drift` means less decline and is better, higher `giveback` means more was
+surrendered and is worse - and the direction test assumed a single polarity. It
+was right for `drift` (which is why the original read correctly) and inverted for
+`giveback`. Had I not checked the arithmetic by hand against the arm means, I
+would have reported a 4.2 SE result backwards, and it would have looked like
+confirmation of a finding it actually overturns. Fixed; both cohorts re-verified.
+
+**The resume confound is ruled out.** Declared alongside: resume rates in the
+replication are 0.224/epoch (data_beta=0) against 0.198 (data_beta=0.3), a
+difference of 0.5 SE. Per the four outcomes fixed in advance, drift failing to
+replicate while resume rates do not differ is the case where the original 2.2 SE
+was noise - which two registered statistics at an 0.089 effective bar always made
+plausible.
+
+**Where this leaves the anchor.** One cohort said it hurts at 2.2 SE, an
+independent cohort says it helps at 4.2 SE on the better-suited statistic and
+finds nothing on the other. Neither is a settled claim about the anchor; what is
+settled is that a single 2 SE result on one cohort of three-to-four seeds does not
+survive replication here, in either direction. A third cohort would be needed
+before saying anything about the anchor with confidence, and the honest present
+status is that the six-epoch null remains the only firm result.
+
+### Superseded: the original drift result (over 12 epochs the anchored arm degrades more)
 
 `report/analyze_drift.py`, pre-registered before the runs existed, read once at
 the declared point (all runs that could qualify: 4 seeds at data_beta=0, 3 at
