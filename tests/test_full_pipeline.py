@@ -555,6 +555,81 @@ def test_resume_restores_rng():
     print("  resume restores rng: OK")
 
 
+def test_resume_is_transparent():
+    """Training through a crash+resume must equal training straight through.
+
+    I claimed this twice from reading the code and was wrong the first time, so it
+    gets measured. Two identical models: one takes two update steps in a row, the
+    other takes one, has its state saved, is wiped the way a fresh process would
+    be, resumes, and takes the second. If resume is transparent the parameters and
+    the optimiser moments match exactly.
+
+    This is what makes resume usable in a comparison at all. If it were not
+    transparent, an arm that crashes more would be trained differently from one
+    that does not, and any between-arm result would carry crash frequency inside
+    it - which is exactly the confound that was suspected here and could not be
+    settled by argument.
+    """
+    import tempfile
+    from types import SimpleNamespace
+
+    from peft import LoraConfig, get_peft_model
+
+    from diffusion_tinker.trainers.base_trainer import BaseDiffusionTrainer
+
+    def fresh():
+        torch.manual_seed(7)
+        m = get_peft_model(
+            TinyTransformer(),
+            LoraConfig(r=4, lora_alpha=8, target_modules=["proj_in", "proj_out"], init_lora_weights="gaussian"),
+        )
+        return m, torch.optim.AdamW([p for p in m.parameters() if p.requires_grad], lr=1e-2)
+
+    def step(model, opt, seed):
+        # a deterministic surrogate for one epoch's update
+        torch.manual_seed(seed)
+        x = torch.randn(2, 4, 8, 8)
+        opt.zero_grad()
+        out = model(x, torch.tensor([500.0, 500.0]), torch.randn(2, 10, 64), torch.randn(2, 32), return_dict=False)[0]
+        out.pow(2).mean().backward()
+        opt.step()
+
+    # straight through
+    a_model, a_opt = fresh()
+    step(a_model, a_opt, 11)
+    step(a_model, a_opt, 12)
+    straight = [p.detach().clone() for p in a_model.parameters() if p.requires_grad]
+
+    # crash between the two steps
+    b_model, b_opt = fresh()
+    step(b_model, b_opt, 11)
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = DDRLConfig(output_dir=tmp)
+        cfg.resumable = True
+        stub = SimpleNamespace(
+            config=cfg, transformer=b_model, optimizer=b_opt, device=torch.device("cpu"),
+            global_step=1, _best_eval_reward=0.0, _evals_without_improvement=0,
+            stat_tracker=SimpleNamespace(stats={}),
+        )
+        stub._state_path = lambda: BaseDiffusionTrainer._state_path(stub)
+        stub._state_fingerprint = lambda: BaseDiffusionTrainer._state_fingerprint(stub)
+        BaseDiffusionTrainer._save_state(stub, next_epoch=1)
+
+        c_model, c_opt = fresh()          # the fresh process after the crash
+        stub.transformer, stub.optimizer = c_model, c_opt
+        assert BaseDiffusionTrainer._load_state(stub) == 1
+    step(c_model, c_opt, 12)
+    resumed = [p.detach().clone() for p in c_model.parameters() if p.requires_grad]
+
+    for i, (x, y) in enumerate(zip(straight, resumed)):
+        assert torch.allclose(x, y, atol=1e-6), (
+            f"param {i} differs by {(x - y).abs().max():.3e} - resume is NOT transparent, "
+            "so an arm that crashes more is trained differently"
+        )
+
+    print("  resume is transparent: OK")
+
+
 def test_reward_resolve():
     """Test reward registry and resolution."""
     # String resolution
