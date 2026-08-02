@@ -191,6 +191,49 @@ same held-out prompts. That is within one SEM, but the four same-node arms agree
 to three decimals while this differs in the second, so the variable is bf16 GEMM
 kernels differing by architecture. Arms must therefore stay on one node type.
 
+### Drift result: over 12 epochs the anchored arm degrades more
+
+`report/analyze_drift.py`, pre-registered before the runs existed, read once at
+the declared point (all runs that could qualify: 4 seeds at data_beta=0, 3 at
+data_beta=0.3, `d3s43` short on length). Curves in `report/drift_csv/`, grown
+entirely under RNG-restoring resume. Common window K=12 epochs.
+
+| statistic | data_beta 0 | data_beta 0.3 | difference | |
+|---|---|---|---|---|
+| drift (late third minus early third) | +0.0007 | -0.0326 | +0.0334, SE 0.0154 | **2.2 SE** |
+| giveback (peak minus final) | +0.0676 | +0.0914 | -0.0238, SE 0.0229 | 1.0 SE |
+
+**Both point the same way and it is the opposite of the anchor's purpose.** The
+unanchored arm is flat late in training; the anchored arm declines and gives back
+more of its peak. The forward-KL data term exists to hold the policy near the
+data manifold over long training, and over these twelve epochs it is associated
+with more degradation, not less.
+
+Four reasons not to treat this as established:
+
+- **Two statistics were pre-registered**, so under the null the chance of one
+  exceeding 2 SE is 0.089, not 0.045. A single 2.2 SE result across two tests is
+  roughly a 2-sigma-equivalent finding at best.
+- **n=3 in the anchored arm**, and a three-run SD is not a reliable SD. The
+  earlier lesson here was a two-run SD reading 0.0276 against 0.0229 at four.
+- **The weaker statistic is the one designed for this shape.** `giveback` was
+  added specifically because `drift` is blind to peak-then-collapse, and it is
+  the one that does not reach threshold.
+- **One read, one task, one horizon.** Counting 6-9 objects at twelve epochs on
+  SD3.5-medium.
+
+What it does establish is that the earlier null is not the whole story: the level
+comparison found nothing over six epochs, and something is visible at twelve. The
+direction is worth taking seriously enough to replicate, which is the honest
+status - a signal that survives its own pre-registration and fails to be
+comfortable.
+
+**Disclosure.** The verdict string in the analysis read "the anchor acts where it
+was meant to" for a difference of either sign. The first real result came out the
+opposite way, so the message would have described the finding backwards. It was
+corrected after seeing the result; no threshold, statistic or inclusion rule
+changed.
+
 ### Result: beta does not separate within 10 epochs
 
 `report/beta_sweep.png` (`report/make_beta_sweep.py`, curves in

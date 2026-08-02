@@ -200,7 +200,20 @@ def main():
             se_diff = (sea ** 2 + seb ** 2) ** 0.5
             print(f"  {a} minus {b} = {diff:+.4f}, SE {se_diff:.4f} -> {abs(diff)/se_diff:.1f} SE")
             if abs(diff) > 2 * se_diff:
-                print(f"  VERDICT ({label}): the arms differ - the anchor acts where it was meant to")
+                # Direction matters and the original wording assumed it. This
+                # string read "the anchor acts where it was meant to" for any
+                # difference, which is only true of one sign; the first real
+                # result came out the other way. Corrected after seeing that,
+                # which is disclosed in VALIDATION.md - it changes no threshold,
+                # statistic or inclusion rule, only a sentence that would have
+                # described the finding backwards.
+                worse = (a == "data_beta=0") == (diff > 0)
+                if worse:
+                    print(f"  VERDICT ({label}): the arms differ, and the ANCHORED arm is worse - "
+                          "opposite to the anchor's purpose")
+                else:
+                    print(f"  VERDICT ({label}): the arms differ, and the anchored arm is better - "
+                          "the anchor acts where it was meant to")
             else:
                 print(f"  VERDICT ({label}): no difference detected at this power.")
         print()
