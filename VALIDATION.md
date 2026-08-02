@@ -266,6 +266,21 @@ roughly 2 SE. All five arms that have started report an epoch-0 held-out reward 
 only training: eval is driven by `eval_seed` and must not move with it. The middle betas are dropped: if 0 and 0.3 do not separate, 0.01 and
 0.05 will not.
 
+#### Seeded design, 7 of 8 runs (current)
+
+| arm | mean | between-seed SD | n |
+|---|---|---|---|
+| data_beta 0 | 0.5465 | 0.0180 | 4 |
+| data_beta 0.3 | 0.5689 | 0.0197 | 3 |
+
+Difference **-0.0225, SE 0.0145, 1.5 SE. No effect detected.** The direction has
+been consistent (beta=0.3 nominally higher) since the second seed landed, and the
+between-seed SD has now stabilised at 0.018-0.020 on both arms with three and four
+runs, against the 0.021 the design was sized on. If the last run lands at a
+comparable SD the difference sits near 1.7 SE, so the expected landing is below
+threshold but not by much. The earlier numbers in this section (0.9 SE at 3-and-2
+seeds, then 1.1) are kept below to show how far a two-run-per-arm estimate moves.
+
 #### Interim result from the seeded design
 
 The pre-registered script (`report/analyze_seeded.py`, committed before the runs
