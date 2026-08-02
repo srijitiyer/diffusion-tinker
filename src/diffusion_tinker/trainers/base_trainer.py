@@ -266,10 +266,11 @@ class BaseDiffusionTrainer(ABC):
         if not self.train_prompts:
             raise ValueError("No training prompts provided. Pass train_prompts to the trainer.")
 
+        start_epoch = self._load_state()
         print(f"Starting training: {self.config.num_epochs} epochs, {len(self.train_prompts)} prompts")
         self._fire_callbacks("on_train_begin")
 
-        for epoch in range(self.config.num_epochs):
+        for epoch in range(start_epoch, self.config.num_epochs):
             self._fire_callbacks("on_epoch_begin", epoch=epoch)
 
             # Evaluate before the epoch's update, not after, so "Eval (epoch 0)"
@@ -342,9 +343,65 @@ class BaseDiffusionTrainer(ABC):
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
+            if self.config.resumable:
+                self._save_state(epoch + 1)
+
         self._save_checkpoint(self.config.num_epochs)
         self._fire_callbacks("on_train_end")
         print("Training complete.")
+
+    def _state_path(self) -> Path:
+        return Path(self.config.output_dir) / "resume_state.pt"
+
+    def _save_state(self, next_epoch: int):
+        """Everything needed to continue as if the crash had not happened.
+
+        Written to a temp file and renamed, because a crash during the write
+        itself would otherwise leave a truncated state that poisons the restart.
+        """
+        from peft.utils import get_peft_model_state_dict
+
+        path = self._state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        torch.save(
+            {
+                "adapter": get_peft_model_state_dict(self.transformer),
+                "optimizer": self.optimizer.state_dict(),
+                "next_epoch": next_epoch,
+                "global_step": self.global_step,
+                "best_eval_reward": self._best_eval_reward,
+                "evals_without_improvement": self._evals_without_improvement,
+                "stat_tracker": getattr(self.stat_tracker, "stats", None),
+            },
+            tmp,
+        )
+        os.replace(tmp, path)
+
+    def _load_state(self) -> int:
+        """Restore a saved state and return the epoch to start from."""
+        from peft.utils import set_peft_model_state_dict
+
+        path = self._state_path()
+        if not self.config.resumable or not path.exists():
+            return 0
+        try:
+            state = torch.load(path, map_location=self.device, weights_only=False)
+        except Exception as exc:
+            print(f"Resume state at {path} is unreadable ({exc}); starting fresh")
+            return 0
+
+        set_peft_model_state_dict(self.transformer, state["adapter"])
+        self.optimizer.load_state_dict(state["optimizer"])
+        self.global_step = state.get("global_step", 0)
+        self._best_eval_reward = state.get("best_eval_reward", -float("inf"))
+        self._evals_without_improvement = state.get("evals_without_improvement", 0)
+        tracked = state.get("stat_tracker")
+        if tracked is not None and hasattr(self.stat_tracker, "stats"):
+            self.stat_tracker.stats = tracked
+        start = int(state.get("next_epoch", 0))
+        print(f"Resuming from {path} at epoch {start} (best so far {self._best_eval_reward:.3f})", flush=True)
+        return start
 
     def _save_checkpoint(self, epoch: int):
         save_path = Path(self.config.output_dir) / f"checkpoint-{epoch}"

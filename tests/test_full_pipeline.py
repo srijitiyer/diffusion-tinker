@@ -367,6 +367,84 @@ def test_kl_variance_finite_at_sigma_one():
     print("  kl variance finite at sigma=1: OK")
 
 
+def test_resume_state_roundtrip():
+    """A crash must cost wall-clock, not training progress.
+
+    The cluster kills jobs at random, and without resume every crash discarded
+    every epoch, so no run could outlast the mean time between crashes and no
+    experiment could ask a question that needed a long run. This pins the parts
+    that make a resume faithful rather than merely non-crashing: the adapter
+    weights, the AdamW moments (a fresh optimizer leaves a transient exactly
+    where a drift measurement would read it), and the epoch to restart from.
+    """
+    import tempfile
+    from types import SimpleNamespace
+
+    from peft import LoraConfig, get_peft_model
+    from peft.utils import get_peft_model_state_dict, set_peft_model_state_dict
+
+    from diffusion_tinker.trainers.base_trainer import BaseDiffusionTrainer
+
+    torch.manual_seed(0)
+    model = get_peft_model(
+        TinyTransformer(),
+        LoraConfig(r=4, lora_alpha=8, target_modules=["proj_in", "proj_out"], init_lora_weights="gaussian"),
+    )
+    trainable = [p for p in model.parameters() if p.requires_grad]
+    opt = torch.optim.AdamW(trainable, lr=1e-3)
+
+    # take a step so the adapter has moved and AdamW has non-empty moments
+    loss = sum(p.pow(2).sum() for p in trainable)
+    loss.backward()
+    opt.step()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        stub = SimpleNamespace(
+            config=SimpleNamespace(output_dir=tmp, resumable=True),
+            transformer=model,
+            optimizer=opt,
+            device=torch.device("cpu"),
+            global_step=7,
+            _best_eval_reward=0.62,
+            _evals_without_improvement=2,
+            stat_tracker=SimpleNamespace(stats={"a cat": [0.1, 0.2]}),
+        )
+        # the stub stands in for a trainer, so it needs the one helper the
+        # save/load pair calls on self
+        stub._state_path = lambda: BaseDiffusionTrainer._state_path(stub)
+        BaseDiffusionTrainer._save_state(stub, next_epoch=5)
+
+        saved_adapter = {k: v.clone() for k, v in get_peft_model_state_dict(model).items()}
+        exp_avg = opt.state_dict()["state"][0]["exp_avg"].clone()
+
+        # wipe everything the way a restart would
+        for p in trainable:
+            with torch.no_grad():
+                p.zero_()
+        fresh_opt = torch.optim.AdamW(trainable, lr=1e-3)
+        stub.optimizer = fresh_opt
+        stub.global_step = 0
+        stub._best_eval_reward = -float("inf")
+        stub._evals_without_improvement = 0
+        stub.stat_tracker = SimpleNamespace(stats={})
+
+        start = BaseDiffusionTrainer._load_state(stub)
+
+    assert start == 5, f"resumed at the wrong epoch: {start}"
+    assert stub.global_step == 7
+    assert abs(stub._best_eval_reward - 0.62) < 1e-9, "best reward not restored, so save_best would regress"
+    assert stub._evals_without_improvement == 2
+    assert stub.stat_tracker.stats == {"a cat": [0.1, 0.2]}, "DDPO's reward history did not survive"
+
+    restored = get_peft_model_state_dict(model)
+    for k, v in saved_adapter.items():
+        assert torch.allclose(restored[k], v), f"adapter weight {k} not restored"
+    got = stub.optimizer.state_dict()["state"][0]["exp_avg"]
+    assert torch.allclose(got, exp_avg), "AdamW moments not restored"
+
+    print("  resume state roundtrip: OK")
+
+
 def test_reward_resolve():
     """Test reward registry and resolution."""
     # String resolution

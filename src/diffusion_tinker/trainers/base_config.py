@@ -112,6 +112,17 @@ class BaseDiffusionConfig:
     output_dir: str = "./output"
     seed: int = 42
     save_best: bool = True
+    # Write a resumable state (adapter, optimizer moments, epoch, advantage
+    # tracker) after every epoch, and pick it up automatically on the next start
+    # if one is found in output_dir. Off by default because it costs a ~80MB
+    # write per epoch, but it is what makes a run survive a node that kills jobs
+    # at random: without it a crash discards every epoch of training and the run
+    # restarts from scratch, so no experiment can outlast the mean time between
+    # crashes. The optimizer moments are saved too, deliberately - resuming with
+    # a fresh AdamW leaves a transient in the curve exactly where a drift
+    # measurement would read it.
+    resumable: bool = False
+
     # Stop after this many consecutive evals without a new best. 0 disables it.
     # Worth turning on: measured runs give back real performance past their peak.
     # SFT reaches a held-out minimum of 0.19742 around step 3098 and drifts back
