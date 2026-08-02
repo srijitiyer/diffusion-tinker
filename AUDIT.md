@@ -422,6 +422,32 @@ pair diverges). A fourth is not worth proposing without single-variable evidence
 The table is not a mechanism and is not meant as one; it is only the operational
 conclusion, which is to keep long runs off atlas29.
 
+**Resume, and the measured before/after.** Until Aug 2 2026 a segfault discarded
+every epoch of training, so a run restarted from zero and no experiment could
+outlast the mean time between crashes. That is why nothing here ever reached the
+twelve epochs a drift measurement needs. `resumable=True` now saves the adapter,
+the AdamW moments, the epoch, the advantage tracker's history and the RNG state
+after every epoch (113 MB, 0.25s, no measurable slowdown).
+
+| | crashes | curve resets |
+|---|---|---|
+| before (`b0`/`b3` arms) | 73 | ~70 rotations |
+| after (`d0`/`d3` arms) | 5 | **0** |
+
+Three defects surfaced only by testing it on hardware rather than trusting the
+unit test. A resumed run re-evaluated the epoch it resumed into, because eval
+runs at the top of an epoch and the state is written at the bottom - the curve
+came back as 0,1,1 and every later row was offset, so curve writes are now
+idempotent per epoch. A stale state could be resumed into a different
+configuration, so it carries a fingerprint of the fields that change what is
+measured and refuses on mismatch. And a completed run's state left in place made
+the next start resume at `num_epochs`, exit immediately and report success having
+trained nothing, so it is deleted on completion.
+
+The RNG state was initially left out, on the argument that unequal randomness is
+a nuisance shared by every arm. That holds only if arms resume equally often, and
+the next section shows they do not.
+
 **A configuration-dependent signal, found Aug 2 2026.** The seeded sweep is the
 first setup here with matched arms differing in exactly one setting, and the
 segfaults are not distributed evenly across them:
