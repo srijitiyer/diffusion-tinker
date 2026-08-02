@@ -33,6 +33,15 @@ Fixed in advance:
 If the arms differ here and not in the level comparison, that is the anchor doing
 its job in the place it was designed to work rather than in the place that was
 convenient to measure.
+
+Provenance note. The runs feeding this were restarted clean on Aug 2 2026. The
+earlier curves (archived under repro_csv/premixed) were grown across a change in
+how resume handled the RNG: before the fix a resumed run drew different rollout
+noise than an uninterrupted one, and because the data_beta=0.3 arms crash roughly
+1.66x more often they absorbed more of those unrestored resumes. That is a
+difference between the arms with nothing to do with the anchor, arriving exactly
+where this analysis reads. Those curves remain valid for the level comparison,
+which was read at its stopping point before any of this, and are not used here.
 """
 import csv
 import os
