@@ -289,6 +289,24 @@ can be trusted. And beta=0.3 comes out nominally *higher* here, the opposite sig
 to what the first sweep's surviving beta=0 run implied - which is the whole point,
 since at 0.9 SE the sign is decided by which runs happen to exist.
 
+**Projection: finishing the design will not change the verdict.** The observed
+difference is 0.0143 with a pooled between-seed SD of 0.0179. Carrying those
+forward:
+
+| seeds/arm | SE(difference) | current difference | difference needed for 2 SE |
+|---|---|---|---|
+| 3 (now) | 0.0146 | 1.0 SE | 0.029 |
+| 4 (the design) | 0.0127 | 1.1 SE | 0.025 |
+| 8 | 0.0090 | 1.6 SE | 0.018 |
+
+At the design's four seeds per arm the effect would have to be nearly double what
+is observed to clear the bar, and even eight seeds per arm leaves it at 1.6 SE.
+So the remaining runs are confirmatory, not decisive: worth finishing because the
+design was pre-registered at four and the jobs are already queued, but there is no
+case for going past that. If a real effect exists here it is smaller than 0.02 on
+this task at this horizon, which is below what this setup can resolve at any
+seed count worth spending.
+
 What this does **not** say. It does not say the anchor is useless - its job is to
 stop drift over long training, and ten epochs is early for drift to appear. It
 does not say the arms are equal, only that this experiment cannot tell them
