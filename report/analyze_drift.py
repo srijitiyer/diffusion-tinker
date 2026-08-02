@@ -37,6 +37,16 @@ If the arms differ here and not in the level comparison, that is the anchor doin
 its job in the place it was designed to work rather than in the place that was
 convenient to measure.
 
+Read resolution, Aug 2 2026, written before any drift value was computed. The
+declared point was "all runs that can qualify", which did not anticipate a run
+that recovers but is far behind. `d3s43` is alive at 3 epochs against a threshold
+of 12, roughly an hour away and liable to crash again. The primary read is
+therefore 4 seeds at data_beta=0 against 3 at data_beta=0.3, with `d3s43`
+excluded on length rather than on being broken - an ordinary shortfall, not the
+configuration-linked exclusion the retracted note described. If it later
+qualifies, that reading is reported as a secondary result alongside this one and
+does not replace it.
+
 Read point, declared before looking. The level comparison had no defined moment
 to be read, so its number moved every time runs grew and I had to record that as
 a gap. This one is read ONCE, when every run that can qualify has qualified -
