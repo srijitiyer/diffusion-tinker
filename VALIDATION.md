@@ -286,6 +286,16 @@ would have supported a different story if quoted alone, which is why the analysi
 was pre-registered and why the verdict is the one the script prints rather than
 the one the trend suggested.
 
+**A gap in the pre-registration, recorded rather than patched over.** The script
+fixed the statistic but not the moment to read it. Both the common length K and
+which run is longest per tag keep moving as runs grow, so re-running it later
+gives a different number: at design completion it read -0.0143 / 1.0 SE, and an
+hour later -0.0088 / 0.7 SE on longer curves. The verdict is the same either way,
+and the value above is the one taken at the pre-registered stopping point (four
+seeds per arm), which is the honest place to read it. A future design should fix
+the epoch window in advance instead of deriving it from whatever the runs
+deliver.
+
 **Conclusion.** Anchor strength between 0 and 0.3 has no detectable effect on
 held-out counting accuracy over the first six epochs on this task. Stated as a
 bound: any true effect is smaller than about 0.03, which is the resolution four
