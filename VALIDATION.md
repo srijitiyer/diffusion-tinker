@@ -296,6 +296,16 @@ and was robust across four re-reads.
 What a real answer would need: the epoch window fixed in advance rather than
 derived, many more seeds than four, and a cluster that lets a run finish.
 
+**That run is now in flight.** Both cohorts had a minimum detectable difference of
+0.033-0.038 at 3-4 seeds, against a measured between-seed SD of 0.0232 - so the
+first cohort's reported 0.0334 sat exactly on its own detection limit. Neither was
+capable of the question. `report/analyze_drift_powered.py` is pre-registered for
+eight seeds per arm (tags `p0s50`-`p0s57`, `p3s50`-`p3s57`), giving a minimum
+detectable effect of 0.0232 with the window fixed at 12 by import rather than
+derived. Until it reads, the honest status of the drift question is not "no
+effect" but **"not yet measured at adequate power"**, and the two nulls above
+should be read as that rather than as evidence of absence.
+
 ### Superseded: the original drift result (over 12 epochs the anchored arm degrades more)
 
 `report/analyze_drift.py`, pre-registered before the runs existed, read once at
