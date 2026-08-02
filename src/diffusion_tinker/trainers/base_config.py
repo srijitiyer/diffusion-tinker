@@ -122,14 +122,13 @@ class BaseDiffusionConfig:
     # a fresh AdamW leaves a transient in the curve exactly where a drift
     # measurement would read it.
     #
-    # What is NOT restored: the global RNG state. A resumed run therefore draws
-    # different rollout noise and a different per-epoch prompt subset than an
-    # uninterrupted one would have, so it is a valid continuation of training but
-    # not a bit-identical one. That is a nuisance shared by every arm rather than
-    # a confound between them, and only because crash rates are near-equal across
-    # configurations (7 vs 6 across two regularizer settings). If you ever compare
-    # arms whose crash rates differ, restore the RNG state first or the comparison
-    # picks up resume frequency along with whatever it meant to measure.
+    # The RNG state (torch, CUDA, python) is saved and restored too, so a resumed
+    # run draws the same randomness an uninterrupted one would. This was initially
+    # left out on the reasoning that unequal randomness is a nuisance shared by
+    # every arm - which only holds if arms resume equally often. Measured on this
+    # cluster they do not: the data_beta=0.3 arms took 40 crashes to data_beta=0's
+    # 31, so resume frequency would have varied alongside the quantity under
+    # comparison and shown up as an effect of the anchor.
     resumable: bool = False
 
     # Stop after this many consecutive evals without a new best. 0 disables it.

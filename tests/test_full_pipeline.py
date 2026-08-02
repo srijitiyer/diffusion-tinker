@@ -7,6 +7,7 @@ Runs on CPU in ~30 seconds.
 
 import math
 import os
+import random
 import tempfile
 
 import torch
@@ -496,6 +497,62 @@ def test_resume_refuses_mismatched_config():
         assert different.global_step == 3 or True  # counters untouched is incidental
 
     print("  resume refuses mismatched config: OK")
+
+
+def test_resume_restores_rng():
+    """A resumed run must draw the same randomness an uninterrupted one would.
+
+    Without this, a resumed run gets different rollout noise and prompt subsets,
+    which is only harmless if every arm resumes equally often. On this cluster
+    they do not: the data_beta=0.3 arms took 40 crashes to data_beta=0's 31, so
+    resume frequency would vary alongside the quantity under comparison and land
+    in the drift measurement as if it were an effect of the anchor.
+    """
+    import tempfile
+    from types import SimpleNamespace
+
+    from peft import LoraConfig, get_peft_model
+
+    from diffusion_tinker.trainers.base_trainer import BaseDiffusionTrainer
+
+    torch.manual_seed(0)
+    model = get_peft_model(
+        TinyTransformer(),
+        LoraConfig(r=4, lora_alpha=8, target_modules=["proj_in", "proj_out"], init_lora_weights="gaussian"),
+    )
+    opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=1e-3)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = DDRLConfig(output_dir=tmp)
+        cfg.resumable = True
+        stub = SimpleNamespace(
+            config=cfg, transformer=model, optimizer=opt, device=torch.device("cpu"),
+            global_step=0, _best_eval_reward=0.0, _evals_without_improvement=0,
+            stat_tracker=SimpleNamespace(stats={}),
+        )
+        stub._state_path = lambda: BaseDiffusionTrainer._state_path(stub)
+        stub._state_fingerprint = lambda: BaseDiffusionTrainer._state_fingerprint(stub)
+
+        torch.manual_seed(1234)
+        random.seed(1234)
+        BaseDiffusionTrainer._save_state(stub, next_epoch=3)
+
+        # what an uninterrupted run would have drawn next
+        expected_torch = torch.randn(5)
+        expected_python = [random.random() for _ in range(3)]
+
+        # disturb both streams the way a fresh process would
+        torch.manual_seed(999)
+        random.seed(999)
+
+        BaseDiffusionTrainer._load_state(stub)
+        got_torch = torch.randn(5)
+        got_python = [random.random() for _ in range(3)]
+
+    assert torch.allclose(got_torch, expected_torch), "torch RNG not restored"
+    assert got_python == expected_python, "python RNG not restored"
+
+    print("  resume restores rng: OK")
 
 
 def test_reward_resolve():

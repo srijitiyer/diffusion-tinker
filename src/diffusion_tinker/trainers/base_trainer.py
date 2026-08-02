@@ -402,6 +402,14 @@ class BaseDiffusionTrainer(ABC):
                 "evals_without_improvement": self._evals_without_improvement,
                 "stat_tracker": getattr(self.stat_tracker, "stats", None),
                 "fingerprint": self._state_fingerprint(),
+                # RNG too. Without it a resumed run draws different rollout noise
+                # and prompt subsets than an uninterrupted one, which is fine only
+                # if every arm resumes equally often. Measured on this cluster they
+                # do not: beta=0.3 took 40 crashes to beta=0's 31, so resume
+                # frequency would ride along with the thing being compared.
+                "rng_cpu": torch.get_rng_state(),
+                "rng_cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+                "rng_python": random.getstate(),
             },
             tmp,
         )
@@ -439,8 +447,24 @@ class BaseDiffusionTrainer(ABC):
         tracked = state.get("stat_tracker")
         if tracked is not None and hasattr(self.stat_tracker, "stats"):
             self.stat_tracker.stats = tracked
+        rng_cpu = state.get("rng_cpu")
+        if rng_cpu is not None:
+            torch.set_rng_state(rng_cpu.cpu() if hasattr(rng_cpu, "cpu") else rng_cpu)
+        rng_cuda = state.get("rng_cuda")
+        if rng_cuda is not None and torch.cuda.is_available():
+            try:
+                torch.cuda.set_rng_state_all([t.cpu() for t in rng_cuda])
+            except Exception as exc:
+                # a different device count than the run that saved it
+                print(f"  could not restore CUDA RNG ({exc}); continuing with the current stream")
+        rng_python = state.get("rng_python")
+        if rng_python is not None:
+            random.setstate(rng_python)
+
         start = int(state.get("next_epoch", 0))
-        print(f"Resuming from {path} at epoch {start} (best so far {self._best_eval_reward:.3f})", flush=True)
+        rng_note = "with RNG" if rng_cpu is not None else "WITHOUT RNG (pre-fix state)"
+        print(f"Resuming from {path} at epoch {start} {rng_note} "
+              f"(best so far {self._best_eval_reward:.3f})", flush=True)
         return start
 
     def _save_checkpoint(self, epoch: int):
