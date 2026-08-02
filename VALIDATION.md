@@ -209,6 +209,30 @@ more of its peak. The forward-KL data term exists to hold the policy near the
 data manifold over long training, and over these twelve epochs it is associated
 with more degradation, not less.
 
+**A confound that may explain it entirely.** In the same cohort, the anchored arm
+resumed more often per epoch than the unanchored one:
+
+| arm | resumes/epoch | n |
+|---|---|---|
+| data_beta 0 | 0.209 (SD 0.071) | 4 |
+| data_beta 0.3 | 0.311 (SD 0.020) | 3 |
+
+Difference +0.103 at **2.7 SE** - a larger effect than the 2.2 SE drift result it
+could account for. The mechanism is direct: resume state is written after each
+epoch, so a crash mid-epoch loses that epoch's training and the resume repeats
+it. The model sees part of that epoch twice. Restoring the RNG made the draws
+identical but does nothing about how many times an epoch is partially replayed,
+so this survived the fix that was supposed to remove resume as a variable.
+
+Whether more partial-epoch repetition should worsen late-training held-out reward
+is not obvious, so this is a candidate rather than a demonstration - and it is
+post-hoc, found by going looking after the drift result appeared. But it is the
+same shape of reasoning that produced the crash-rate signal which then failed
+replication, so it is recorded with the same suspicion. The replication cohort
+can test it directly: if the arms there resume at similar rates and the drift
+difference persists, the confound is ruled out; if resume rates differ again and
+track the drift, it is the better explanation.
+
 Four reasons not to treat this as established:
 
 - **Two statistics were pre-registered**, so under the null the chance of one
