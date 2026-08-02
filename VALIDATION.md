@@ -289,23 +289,24 @@ can be trusted. And beta=0.3 comes out nominally *higher* here, the opposite sig
 to what the first sweep's surviving beta=0 run implied - which is the whole point,
 since at 0.9 SE the sign is decided by which runs happen to exist.
 
-**Projection: finishing the design will not change the verdict.** The observed
-difference is 0.0143 with a pooled between-seed SD of 0.0179. Carrying those
-forward:
+**Projection, revised.** An earlier version of this section said the remaining
+runs were confirmatory and could not change the verdict. That was premature and is
+withdrawn. It rested on a difference of 0.0143, which has since grown to 0.0237 as
+runs lengthened and the beta=0 arm filled out to four seeds. Reprojecting on the
+current numbers:
 
-| seeds/arm | SE(difference) | current difference | difference needed for 2 SE |
+| if beta=0.3 finishes at n=4 with... | SE(difference) | 0.0237 would be | needed for 2 SE |
 |---|---|---|---|
-| 3 (now) | 0.0146 | 1.0 SE | 0.029 |
-| 4 (the design) | 0.0127 | 1.1 SE | 0.025 |
-| 8 | 0.0090 | 1.6 SE | 0.018 |
+| SD 0.0180 (what beta=0 measured) | 0.0127 | 1.9 SE | 0.0255 |
+| SD 0.0276 (what its two runs show now) | 0.0165 | 1.4 SE | 0.0330 |
 
-At the design's four seeds per arm the effect would have to be nearly double what
-is observed to clear the bar, and even eight seeds per arm leaves it at 1.6 SE.
-So the remaining runs are confirmatory, not decisive: worth finishing because the
-design was pre-registered at four and the jobs are already queued, but there is no
-case for going past that. If a real effect exists here it is smaller than 0.02 on
-this task at this horizon, which is below what this setup can resolve at any
-seed count worth spending.
+So the outcome is genuinely open: at the low end it lands just under the threshold
+and at the high end well under, but neither is the settled null the earlier text
+claimed. The lesson is the one this whole section is about - a difference computed
+from two runs per arm moves substantially as runs lengthen, and quoting a
+projection from it is the same error as quoting the arm ranking from the first
+sweep. The design gets finished at four seeds per arm and the pre-registered script
+decides.
 
 What this does **not** say. It does not say the anchor is useless - its job is to
 stop drift over long training, and ten epochs is early for drift to appear. It
