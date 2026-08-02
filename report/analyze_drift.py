@@ -40,25 +40,17 @@ convenient to measure.
 Read point, declared before looking. The level comparison had no defined moment
 to be read, so its number moved every time runs grew and I had to record that as
 a gap. This one is read ONCE, when every run that can qualify has qualified -
-that is four seeds at data_beta=0 and three at data_beta=0.3, `d3s43` being
-permanently broken (below). At the moment of writing this the counts were 4 and
+that is four seeds at data_beta=0, and four at data_beta=0.3 if `d3s43` recovers
+or three if it does not (see below - it was written off and then recovered). At the moment of writing this the counts were 4 and
 2, with `d3s44` one epoch short; that state was not analysed. Re-reads after the
 declared point are reported as such, not substituted for it.
 
-Known exclusion. `d3s43` (data_beta=0.3, seed 43) segfaults reproducibly in the
-backward pass of epoch 0 - five consecutive attempts, all inside gradient-
-checkpoint recompute at the same line, never reaching the first state save. Same
-seed replays the same rollout, so unlike the intermittent crashes this one
-repeats exactly. It will therefore contribute no curve, leaving data_beta=0.3
-with three seeds against data_beta=0's four.
-
-That is a non-random exclusion and worth naming rather than absorbing: the run is
-missing for a reason tied to its own (seed, data_beta) combination, so if seed 43
-would have produced an extreme drift value under the anchor, its absence shifts
-that arm's mean. Nothing can be done about it without either dropping seed 43
-from both arms - which throws away a working run to match a broken one - or
-substituting a fresh seed, which breaks the crossed design. Reported as-is with
-the asymmetry stated.
+Formerly-excluded run. `d3s43` failed six consecutive times in the epoch-0
+backward pass and was written up as permanently broken, which is why the read
+point below names three seeds for data_beta=0.3. It then went through on the
+seventh attempt and is training normally, so the streak was luck rather than a
+mechanism and there is no exclusion. If it reaches the threshold it is included
+like any other run; if it does not, the arm reports three seeds and says so.
 
 Provenance note. The runs feeding this are the `d0*`/`d3*` tags, started clean on
 Aug 2 2026. The

@@ -448,15 +448,20 @@ The RNG state was initially left out, on the argument that unequal randomness is
 a nuisance shared by every arm. That holds only if arms resume equally often, and
 the next section shows they do not.
 
-**One segfault is reproducible, and it is the first that is.** `d3s43`
-(data_beta=0.3, seed 43) has died five consecutive times in the backward pass of
-epoch 0, inside gradient-checkpoint recompute, never surviving to its first state
-save. A fixed seed replays the same rollout, so this one repeats exactly where
-every other crash here has been intermittent and position-independent. It is the
-single-variable evidence the earlier note asked for, though of a narrower claim
-than "configuration causes crashes": one specific (seed, data_beta) combination
-reliably hits something in the backward pass. The practical cost is a missing arm
-in the drift comparison, recorded there as a non-random exclusion.
+**A segfault that looked reproducible and was not.** `d3s43` (data_beta=0.3,
+seed 43) died six consecutive times in the backward pass of epoch 0, inside
+gradient-checkpoint recompute, never surviving to its first state save. Six in a
+row at the same line, with a fixed seed replaying the same rollout, read as
+deterministic and was written up here as the first reproducible crash in the
+project. On the seventh attempt it went straight through and is now training
+normally.
+
+So it was a streak, not a mechanism. Worth keeping as a calibration point: at a
+background rate near 0.5 crashes per GPU-hour, six identical-looking failures is
+unlikely enough to feel like a signal and still be luck, and "it failed the same
+way every time" is not evidence of determinism unless the alternative was
+actually ruled out. The claim was retracted within the hour; the drift analysis's
+exclusion note went with it.
 
 **A configuration-dependent signal, found Aug 2 2026.** The seeded sweep is the
 first setup here with matched arms differing in exactly one setting, and the
