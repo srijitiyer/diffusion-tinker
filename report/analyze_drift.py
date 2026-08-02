@@ -37,6 +37,21 @@ If the arms differ here and not in the level comparison, that is the anchor doin
 its job in the place it was designed to work rather than in the place that was
 convenient to measure.
 
+Known exclusion. `d3s43` (data_beta=0.3, seed 43) segfaults reproducibly in the
+backward pass of epoch 0 - five consecutive attempts, all inside gradient-
+checkpoint recompute at the same line, never reaching the first state save. Same
+seed replays the same rollout, so unlike the intermittent crashes this one
+repeats exactly. It will therefore contribute no curve, leaving data_beta=0.3
+with three seeds against data_beta=0's four.
+
+That is a non-random exclusion and worth naming rather than absorbing: the run is
+missing for a reason tied to its own (seed, data_beta) combination, so if seed 43
+would have produced an extreme drift value under the anchor, its absence shifts
+that arm's mean. Nothing can be done about it without either dropping seed 43
+from both arms - which throws away a working run to match a broken one - or
+substituting a fresh seed, which breaks the crossed design. Reported as-is with
+the asymmetry stated.
+
 Provenance note. The runs feeding this are the `d0*`/`d3*` tags, started clean on
 Aug 2 2026. The
 earlier curves (archived under repro_csv/premixed) were grown across a change in

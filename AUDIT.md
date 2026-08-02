@@ -448,6 +448,16 @@ The RNG state was initially left out, on the argument that unequal randomness is
 a nuisance shared by every arm. That holds only if arms resume equally often, and
 the next section shows they do not.
 
+**One segfault is reproducible, and it is the first that is.** `d3s43`
+(data_beta=0.3, seed 43) has died five consecutive times in the backward pass of
+epoch 0, inside gradient-checkpoint recompute, never surviving to its first state
+save. A fixed seed replays the same rollout, so this one repeats exactly where
+every other crash here has been intermittent and position-independent. It is the
+single-variable evidence the earlier note asked for, though of a narrower claim
+than "configuration causes crashes": one specific (seed, data_beta) combination
+reliably hits something in the backward pass. The practical cost is a missing arm
+in the drift comparison, recorded there as a non-random exclusion.
+
 **A configuration-dependent signal, found Aug 2 2026.** The seeded sweep is the
 first setup here with matched arms differing in exactly one setting, and the
 segfaults are not distributed evenly across them:
