@@ -229,6 +229,19 @@ FlowGRPO-vs-DDRL past epoch 0: bf16 GEMM nondeterminism across processes, which
 RL's feedback loop amplifies. This is the first time it has been measured at the
 scale of a whole run rather than a single epoch.
 
+A second replicate pair turned up independently in the seeded design, where
+`b0s42` crashed and was resubmitted and both runs reached 8 points:
+
+| `b0s42` (data_beta 0, seed 42) | n | mean(ep 1..7) | peak |
+|---|---|---|---|
+| run A | 8 | 0.5667 | 0.603 |
+| run B | 8 | 0.5472 | 0.599 |
+
+Spread 0.020, against 0.029 for the `hb0` pair. Two independent measurements of
+run-to-run divergence at a fixed configuration, both in the 0.02-0.03 range, and
+both the size of the between-arm spread the first sweep was trying to interpret.
+The estimate the seeded design was sized on is holding up.
+
 **Every point of every arm lies inside +/-1 SEM of the untrained baseline.** The
 spread between arm means is 0.029 (0.546 to 0.575, excluding `hk001`), while the
 standard error on a single point is 0.07 and on an arm mean is 0.023-0.029. The
