@@ -186,8 +186,14 @@ def main():
               "No values printed before then.")
         return
 
-    K = min(len(v) for _, v in runs.values())
-    print(f"\ncommon length K={K}; {len(runs)} runs qualify\n")
+    # The window is DRIFT_MIN_K, fixed, not the common run length. The
+    # registration declared 12 and called it "fixed here rather than tuned to
+    # whatever the runs deliver"; the code then used 12 as an inclusion threshold
+    # and derived the window from whatever the shortest qualifying run happened
+    # to have. That gap produced a 4.2 SE result at K=14 which fell to 0.4 SE at
+    # K=12 when one more run qualified - the window moved, not the anchor.
+    K = DRIFT_MIN_K
+    print(f"\nfixed window K={K}; {len(runs)} runs qualify\n")
 
     for label, fn in (("drift", drift), ("giveback", giveback)):
         per_arm = {}

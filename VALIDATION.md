@@ -219,6 +219,20 @@ The pre-registered criterion was explicit: *an opposite sign, at any strength,
 means the first result does not stand*. Drift's sign flipped, so **the 2.2 SE
 finding that the anchor makes degradation worse is withdrawn.**
 
+**Definitive reading, fixed window K=12.** The window is now the declared 12
+rather than the common run length, which is what the registration said and the
+code did not do. Both cohorts, same window, same statistics:
+
+| cohort | seeds | drift | giveback |
+|---|---|---|---|
+| original | 4 / 3 | **2.2 SE**, anchor worse | 1.0 SE |
+| replication | 4 / 4 | 0.3 SE | 0.4 SE |
+
+**The original does not replicate.** An independent cohort at equal or better
+power finds nothing on either statistic, and the 4.2 SE that briefly appeared to
+reverse it was the K=14 artifact and does not exist under the fixed window. No
+claim about the anchor survives.
+
 **And the replacement did not survive one more run.** The read above was taken at
 seven qualifying runs under the stall clause of the declared read point. The
 eighth run qualified minutes later, which shortened the common window from K=14

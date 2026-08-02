@@ -212,7 +212,7 @@ So the conclusion is a bound rather than a bare null. Anchor strength between $0
 
 This is a negative result about the experiment as much as about $\beta$. It does not say the anchor is useless --- its job is to prevent drift over long training, and ten to fifteen epochs is early for drift --- only that this design cannot tell the arms apart, and that the previous design could not have either.
 
-\section{Drift: the anchor over a longer horizon}
+\section{Drift: a result that did not survive replication}
 
 The comparison above ran to six epochs, which is early for the thing a data anchor is for. Its job is to keep the policy near the data manifold over long training, so a null at six epochs says little about it. Reaching twelve required fixing the reason nothing here ever ran that long: a segfault discarded all training and the run restarted from zero, so no experiment could outlast the mean time between crashes. With adapter, optimiser moments, epoch, advantage history and RNG state checkpointed every epoch, 73 crashes that previously produced about 70 curve resets became 5 crashes producing none.
 
@@ -232,6 +232,12 @@ giveback & $+0.0676$ & $+0.0914$ & $-0.0238$, SE $0.0229$ & 1.0\,SE \\
 \end{center}
 
 \noindent Both point the same way, and it is the opposite of the anchor's purpose: the unanchored arm is flat late in training while the anchored one declines and gives back more of its peak.
+
+\textbf{It does not replicate, and the analysis had a flaw that manufactured a second result.} An independent cohort of four fresh seeds per arm, read under the same fixed twelve-epoch window, gives $0.3$\,SE on \code{drift} and $0.4$\,SE on \code{giveback} --- nothing on either. Between those two readings a $4.2$\,SE result appeared and disappeared: read at seven qualifying runs the common window was fourteen epochs and \code{giveback} separated at $4.2$\,SE in the \emph{opposite} direction, and when the eighth run qualified the window shortened to twelve and the same statistic fell to $0.4$\,SE. The window had moved, not the anchor.
+
+That flaw was diagnosed before it was committed. After the level comparison this repo recorded that deriving the window from the common run length makes a result a moving target, and that a future design should fix it in advance; the drift analysis was then pre-registered with common-length truncation anyway, while separately declaring twelve as ``fixed here rather than tuned to whatever the runs deliver.'' The code used twelve as an inclusion threshold and the window as whatever the shortest run happened to have. Aligning them is the reading above.
+
+So no claim about the anchor survives. What the exercise establishes is about the measurement: four seeds per arm, curves at $\sim0.07$ SEM, on a node that kills jobs hourly, will produce two-to-four sigma results in either direction depending on when they are read. The six-epoch null stands as the only firm result in this section, and it stands partly because it was read once at a fixed design point and held across four re-reads.
 
 Four reasons this is not presented as established. Two statistics were registered, so under the null the chance of one exceeding $2$\,SE is $0.089$ rather than $0.045$. The anchored arm has three seeds, and a three-seed standard deviation is not a reliable one --- the same quantity read $0.0276$ from two runs against $0.0229$ from four. The statistic built for this shape, \code{giveback}, is the one that misses threshold. And it is one read, one task, one horizon. A replication on four fresh seeds per arm is running, pre-registered with its disconfirming outcome stated in advance: an opposite sign at any strength means this does not stand.
 
