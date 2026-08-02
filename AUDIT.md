@@ -422,6 +422,34 @@ pair diverges). A fourth is not worth proposing without single-variable evidence
 The table is not a mechanism and is not meant as one; it is only the operational
 conclusion, which is to keep long runs off atlas29.
 
+**A configuration-dependent signal, found Aug 2 2026.** The seeded sweep is the
+first setup here with matched arms differing in exactly one setting, and the
+segfaults are not distributed evenly across them:
+
+| arm | GPU-hours | crashes | crashes/GPU-hour | runs reaching 12 epochs |
+|---|---|---|---|---|
+| `data_beta`=0 | 82.6 | 34 | 0.412 | 4 of 4 |
+| `data_beta`=0.3 | 64.4 | 44 | 0.683 | 0 of 4 |
+
+A 1.66x rate difference, z = 2.2 (p ~ 0.025) against equal rates given the
+exposure, and the 4-vs-0 split on run length is p ~ 0.029 by Fisher. The arms are
+matched in everything else and the seeds are crossed, so this is single-variable
+in a way the three earlier hypotheses were not - none of them varied `data_beta`.
+
+Two reasons not to promote it to a cause yet. It is post-hoc: the run-length gap
+was noticed first and the rate computed afterwards, which is the forking-paths
+setup, so the p-values are optimistic. And the obvious mechanism does not
+implicate the anchor as such - `data_beta > 0` adds a forward and backward on
+anchor latents at every timestep, so those runs execute more kernels and
+allocations per GPU-hour, and the right exposure unit may be kernel launches
+rather than wall-clock. Under that reading the anchor is not special, it is just
+doing more work in the same time.
+
+The test that would settle it is a pre-registered one: matched runs differing
+only in `data_beta`, crashes counted per unit of GPU work rather than per hour.
+Recorded here so the earlier "not configuration-dependent" line is read as what it
+was - true of the variables tested then, not of this one.
+
 Moving off it is not currently possible for these runs. The a5000 node is stable
 but full, and the 16GB a4000s - 28 of them free - cannot hold an SD3.5 rollout at
 group 12 and 512px. Two probes OOMed with **byte-identical** figures at
