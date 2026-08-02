@@ -266,62 +266,38 @@ roughly 2 SE. All five arms that have started report an epoch-0 held-out reward 
 only training: eval is driven by `eval_seed` and must not move with it. The middle betas are dropped: if 0 and 0.3 do not separate, 0.01 and
 0.05 will not.
 
-#### Seeded design, 7 of 8 runs (current)
+#### Seeded design: final, all four seeds per arm
 
 | arm | mean | between-seed SD | n |
 |---|---|---|---|
 | data_beta 0 | 0.5465 | 0.0180 | 4 |
-| data_beta 0.3 | 0.5689 | 0.0197 | 3 |
+| data_beta 0.3 | 0.5607 | 0.0229 | 4 |
 
-Difference **-0.0225, SE 0.0145, 1.5 SE. No effect detected.** The direction has
-been consistent (beta=0.3 nominally higher) since the second seed landed, and the
-between-seed SD has now stabilised at 0.018-0.020 on both arms with three and four
-runs, against the 0.021 the design was sized on. If the last run lands at a
-comparable SD the difference sits near 1.7 SE, so the expected landing is below
-threshold but not by much. The earlier numbers in this section (0.9 SE at 3-and-2
-seeds, then 1.1) are kept below to show how far a two-run-per-arm estimate moves.
+**Difference -0.0143, SE 0.0146, 1.0 SE. No effect detected.** The 95% interval on
+the difference is roughly [-0.044, +0.015], so it covers zero comfortably. The two
+arms' seed values interleave: beta=0 spans 0.5277-0.5688 and beta=0.3 spans
+0.5362-0.5897.
 
-#### Interim result from the seeded design
+The last run is the point. At seven of eight runs the difference was 0.0225 and
+projecting to about 1.7 SE; `b3s42` landed at 0.5362, the lowest beta=0.3 seed, and
+pulled it back to 0.0143 - the same value it had at three-and-two seeds. Every
+intermediate reading of this experiment (0.9 SE, then 1.1, then 1.5, then 1.0)
+would have supported a different story if quoted alone, which is why the analysis
+was pre-registered and why the verdict is the one the script prints rather than
+the one the trend suggested.
 
-The pre-registered script (`report/analyze_seeded.py`, committed before the runs
-finished) first became runnable at 3 seeds for beta=0 and 2 for beta=0.3, common
-length 6 epochs:
+**Conclusion.** Anchor strength between 0 and 0.3 has no detectable effect on
+held-out counting accuracy over the first six epochs on this task. Stated as a
+bound: any true effect is smaller than about 0.03, which is the resolution four
+seeds per arm buys at a between-seed SD of 0.02. Going further needs either many
+more seeds or a task where the anchor has more to do - its role is preventing
+drift over long training, and six epochs is early for drift.
 
-| arm | mean | between-seed SD | n |
-|---|---|---|---|
-| data_beta 0 | 0.5477 | 0.0196 | 3 |
-| data_beta 0.3 | 0.5621 | 0.0161 | 2 |
-
-Difference **-0.0144 with SE 0.0161, i.e. 0.9 SE. No effect detected at this
-power.** Still interim: the design calls for four seeds per arm and crashes have
-delivered three and two, so the same script gets rerun unchanged when the rest
-land.
-
-Two things are worth taking from it already. The design was sized on a run-to-run
-SD of 0.021 estimated from one accidental replicate pair, and the seeds measure
-0.0196 and 0.0161 directly, so that estimate holds and the SE on the difference
-can be trusted. And beta=0.3 comes out nominally *higher* here, the opposite sign
-to what the first sweep's surviving beta=0 run implied - which is the whole point,
-since at 0.9 SE the sign is decided by which runs happen to exist.
-
-**Projection, revised.** An earlier version of this section said the remaining
-runs were confirmatory and could not change the verdict. That was premature and is
-withdrawn. It rested on a difference of 0.0143, which has since grown to 0.0237 as
-runs lengthened and the beta=0 arm filled out to four seeds. Reprojecting on the
-current numbers:
-
-| if beta=0.3 finishes at n=4 with... | SE(difference) | 0.0237 would be | needed for 2 SE |
-|---|---|---|---|
-| SD 0.0180 (what beta=0 measured) | 0.0127 | 1.9 SE | 0.0255 |
-| SD 0.0276 (what its two runs show now) | 0.0165 | 1.4 SE | 0.0330 |
-
-So the outcome is genuinely open: at the low end it lands just under the threshold
-and at the high end well under, but neither is the settled null the earlier text
-claimed. The lesson is the one this whole section is about - a difference computed
-from two runs per arm moves substantially as runs lengthen, and quoting a
-projection from it is the same error as quoting the arm ranking from the first
-sweep. The design gets finished at four seeds per arm and the pre-registered script
-decides.
+**On reading this experiment while it ran.** The intermediate values are kept in
+git history rather than here. Two mistakes are worth naming: I projected a final
+verdict from a two-run-per-arm difference and had to withdraw it, and the between-
+seed SD estimated from two runs (0.0276) was badly off the four-run value (0.0229
+and 0.0180). A two-run standard deviation is not a standard deviation.
 
 What this does **not** say. It does not say the anchor is useless - its job is to
 stop drift over long training, and ten epochs is early for drift to appear. It
