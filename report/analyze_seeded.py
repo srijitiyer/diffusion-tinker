@@ -41,10 +41,28 @@ MIN_POINTS = 6  # a run with fewer than this is dropped rather than padded
 
 
 def _read(path):
+    """Values indexed by epoch, verified rather than assumed.
+
+    Everything downstream treats position in this list as the epoch number. That
+    held while every run started at epoch 0 and wrote one row per epoch, but
+    resume makes it an assumption worth checking: a resumed job whose CSV was
+    rotated away would start its file at epoch 8, and position-as-epoch would
+    then silently compare one arm's epoch 8 against another's epoch 0. Returning
+    nothing is the right failure here - a dropped run costs power, a misaligned
+    one costs correctness.
+    """
     with open(path) as f:
         r = csv.reader(f)
         next(r, None)
-        return [float(row[1]) for row in r if len(row) >= 2]
+        rows = [(int(float(row[0])), float(row[1])) for row in r if len(row) >= 2]
+    if not rows:
+        return []
+    epochs = [e for e, _ in rows]
+    if epochs != list(range(len(epochs))):
+        print(f"  SKIPPING {os.path.basename(path)}: epochs are not 0..{len(epochs)-1} "
+              f"(starts at {epochs[0]}, ends at {epochs[-1]}, {len(epochs)} rows)")
+        return []
+    return [v for _, v in rows]
 
 
 def load(tag):
