@@ -30,6 +30,13 @@ three readings stay comparable:
     when one more run qualified.
   - Same longest-run selection, same epoch-contiguity check, same 2 SE threshold.
 
+Submission order is interleaved by seed (p0s50, p3s50, p0s51, p3s51, ...) rather
+than one arm's block then the other's. With sixteen jobs on a seven-GPU node, a
+blocked submission hands one arm every early slot, so it accumulates epochs first
+and its runs sit on the node under different contention. That is a systematic
+difference between arms with nothing to do with the anchor, and it is free to
+remove at submission time and impossible to remove afterwards.
+
 Declared read point: once, when all sixteen runs have qualified, or when twelve
 have qualified and no further run has crossed the threshold for an hour. The
 second clause exists because a single straggler held up the last read and the
