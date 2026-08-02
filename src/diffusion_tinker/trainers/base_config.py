@@ -121,6 +121,15 @@ class BaseDiffusionConfig:
     # crashes. The optimizer moments are saved too, deliberately - resuming with
     # a fresh AdamW leaves a transient in the curve exactly where a drift
     # measurement would read it.
+    #
+    # What is NOT restored: the global RNG state. A resumed run therefore draws
+    # different rollout noise and a different per-epoch prompt subset than an
+    # uninterrupted one would have, so it is a valid continuation of training but
+    # not a bit-identical one. That is a nuisance shared by every arm rather than
+    # a confound between them, and only because crash rates are near-equal across
+    # configurations (7 vs 6 across two regularizer settings). If you ever compare
+    # arms whose crash rates differ, restore the RNG state first or the comparison
+    # picks up resume frequency along with whatever it meant to measure.
     resumable: bool = False
 
     # Stop after this many consecutive evals without a new best. 0 disables it.
