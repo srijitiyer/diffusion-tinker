@@ -175,8 +175,15 @@ def main():
             else:
                 print(f"  not yet: {t} has {len(v)} epochs, need {DRIFT_MIN_K}")
 
-    if len(runs) < 4:
-        print(f"\n{len(runs)} runs long enough; need at least 2 per arm before this says anything")
+    # Silent until both arms can actually be compared. Printing per-arm means at
+    # n=1 leaks a partial result before the declared read point - which happened
+    # once, from running this only to check the fetch plumbing worked, and had to
+    # be disclosed. A script that reports early makes peeking the default.
+    counts = {arm: sum(1 for a, _ in runs.values() if a == arm) for arm in ARMS}
+    if len(runs) < 4 or any(c < 2 for c in counts.values()):
+        have = ", ".join(f"{a}: {c}" for a, c in counts.items())
+        print(f"\n{len(runs)} runs long enough ({have}); need at least 2 per arm. "
+              "No values printed before then.")
         return
 
     K = min(len(v) for _, v in runs.values())
