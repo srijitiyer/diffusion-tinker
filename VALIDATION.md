@@ -249,6 +249,17 @@ because an unexplained asymmetry that tracks the outcome would be worth knowing
 about even without a mechanism - but it is no longer a candidate explanation, it
 is a check for one.
 
+**Disclosure: I saw a partial replication value before the declared read point.**
+Running `analyze_drift_rep.py` to check that a new fetch script worked printed
+per-arm drift means at n=3 for data_beta=0 and n=1 for data_beta=0.3 - the
+analysis reported as soon as four runs qualified in total, without requiring two
+per arm. The values were +0.0222 and +0.0414, which at n=1 in one arm means
+nothing statistically but points *opposite* to the original result. I am
+recording it because I cannot un-see it and because a reader weighing the final
+replication is entitled to know I had a partial look first. The analysis now
+stays silent until both arms have at least two qualifying runs, and the declared
+read point is unchanged.
+
 Four reasons not to treat this as established:Four reasons not to treat this as established:
 
 - **Two statistics were pre-registered**, so under the null the chance of one
