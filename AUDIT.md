@@ -463,7 +463,18 @@ way every time" is not evidence of determinism unless the alternative was
 actually ruled out. The claim was retracted within the hour; the drift analysis's
 exclusion note went with it.
 
-**A configuration-dependent signal, found Aug 2 2026.** The seeded sweep is the
+**The configuration-dependent signal did not replicate.** The finding below was
+recorded post-hoc and flagged as needing a declared test. That test was written
+before the replication cohort's crash counts were read, with exposure in
+GPU-seconds, a threshold of |z| > 2 and a 30-crash minimum
+(`report/analyze_crashrate.py`). On the closed drift cohort it reads **z = 1.3,
+not replicated**. The original z = 2.2 was inflated by having been found after
+noticing the pattern, which is what the pre-registration existed to detect. The
+standing conclusion stands unchanged: segfaults here are intermittent and no
+configuration has been shown to cause them. What follows is kept for provenance,
+not as a live claim.
+
+**A configuration-dependent signal, found Aug 2 2026 (SUPERSEDED - see above).** The seeded sweep is the
 first setup here with matched arms differing in exactly one setting, and the
 segfaults are not distributed evenly across them:
 
