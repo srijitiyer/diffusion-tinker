@@ -19,6 +19,13 @@ into a positive one. So the choices are fixed here in advance:
     cancels in a run-to-run comparison.
   - The verdict threshold is |difference| > 2 SE. Anything else is "no effect
     detected at this power", which is not the same as "no effect".
+  - A tag can have SEVERAL runs, because the node crashes jobs and the supervisor
+    resubmits them, and the logger rotates rather than truncating. The rule is
+    the LONGEST run for that tag, and it lives here rather than in whoever copies
+    the files, which is where it was for the first pass. It is a non-random
+    selection, so it is only sound because crash timing is independent of the
+    reward values - which is what the near-equal crash counts across arms (7 vs
+    6 across two different regularizer settings) support.
 """
 import csv
 import os
@@ -33,14 +40,23 @@ ARMS = {
 MIN_POINTS = 6  # a run with fewer than this is dropped rather than padded
 
 
-def load(tag):
-    path = os.path.join(CSV_DIR, f"{tag}_eval.csv")
-    if not os.path.exists(path):
-        return []
+def _read(path):
     with open(path) as f:
         r = csv.reader(f)
         next(r, None)
         return [float(row[1]) for row in r if len(row) >= 2]
+
+
+def load(tag):
+    """Longest run for this tag, across the logger's rotated files."""
+    best = []
+    for name in os.listdir(CSV_DIR) if os.path.isdir(CSV_DIR) else []:
+        if not name.startswith(f"{tag}_eval") or not name.endswith(".csv"):
+            continue
+        v = _read(os.path.join(CSV_DIR, name))
+        if len(v) > len(best):
+            best = v
+    return best
 
 
 def main():
