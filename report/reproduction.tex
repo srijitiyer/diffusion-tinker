@@ -191,22 +191,24 @@ rerun & 15 & 0.562 & 0.551 & 0.546 \\
 
 Runs at one seed diverge because bf16 GEMM nondeterminism across processes is amplified by the RL feedback loop --- already known for a single epoch, now measured across a whole run. Since the eval latents are pinned and identical across runs, that divergence is the policy and not the measurement, so raising the eval sample count would not touch it. Replicate seeds are the only lever. Resolving a $0.03$ effect needs roughly four seeds per arm: $\beta \in \{0, 0.3\}$ at four seeds each, dropping the middle values on the grounds that if the endpoints do not separate, $0.01$ and $0.05$ will not.
 
-The seeded comparison is under way and its analysis was written and committed before the runs finished, fixing in advance that the unit is a run rather than an eval point, that each run contributes its mean over a common epoch range, and that the error comes from between-seed spread. At three seeds for $\beta{=}0$ and two for $\beta{=}0.3$ it reads:
+The seeded comparison is now complete, and its analysis was written and committed before the runs finished, fixing in advance that the unit is a run rather than an eval point, that each run contributes its mean over a common epoch range, that the error comes from between-seed spread, and that a tag with several runs contributes its longest. At four seeds per arm:
 
 \begin{center}
 \begin{tabular}{lccc}
 \toprule
 arm & mean & between-seed SD & $n$ \\
 \midrule
-\code{data\_beta}$=0$ & 0.5477 & 0.0196 & 3 \\
-\code{data\_beta}$=0.3$ & 0.5621 & 0.0161 & 2 \\
+\code{data\_beta}$=0$ & 0.5465 & 0.0180 & 4 \\
+\code{data\_beta}$=0.3$ & 0.5607 & 0.0229 & 4 \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\noindent A difference of $-0.0143$ against a standard error of $0.0161$, so $0.9$\,SE and no effect detected. Two things are worth taking from it. The design was sized on a run-to-run SD of $0.021$ estimated from one accidental replicate pair, and the seeds measure $0.0196$ and $0.0161$ directly, so that estimate holds. And $\beta{=}0.3$ comes out nominally \emph{higher} here, the opposite sign to what the first sweep's surviving $\beta{=}0$ run implied, which is what a $0.9$\,SE difference should do.
+\noindent Difference $-0.0143$ against a standard error of $0.0146$: $1.0$\,SE, no effect detected. The $95\%$ interval is roughly $[-0.044, +0.015]$, and the seed values interleave, $\beta{=}0$ spanning $0.5277$--$0.5688$ against $\beta{=}0.3$'s $0.5362$--$0.5897$.
 
-Finishing the design will not change this. With a pooled between-seed SD of $0.0179$, four seeds per arm gives a standard error of $0.0127$ on the difference, so the observed $0.0143$ would have to nearly double to clear $2$\,SE; even eight seeds per arm leaves it at $1.6$\,SE. The remaining runs are confirmatory. The substantive statement is a bound rather than a null: if anchor strength matters on this task at this horizon, it matters by less than about $0.02$, which is below what this setup can resolve at any seed count worth paying for.
+The last run is worth dwelling on. At seven of eight runs the difference was $0.0225$ and projecting to about $1.7$\,SE; the eighth landed at $0.5362$, the lowest $\beta{=}0.3$ seed, and pulled it back to $0.0143$ --- the same value it had held at three-and-two seeds. Read in sequence the experiment said $0.9$\,SE, then $1.1$, then $1.5$, then $1.0$, and any of those quoted alone supports a different story. That is what the pre-registration was for, and it is also why an earlier draft of this section carried a projection that the remaining runs could not change the verdict: that projection was computed from a two-run-per-arm difference, which is the same error as reading a ranking off the first sweep. It has been withdrawn. A two-run standard deviation is not a standard deviation --- estimated from two runs it read $0.0276$, against $0.0229$ and $0.0180$ at four.
+
+So the conclusion is a bound rather than a bare null. Anchor strength between $0$ and $0.3$ has no detectable effect on held-out counting accuracy over the first six epochs of this task, and any true effect is smaller than about $0.03$, which is the resolution four seeds per arm buys at a between-seed SD of $0.02$. Going further needs many more seeds, or a task where the anchor has more to do.
 
 This is a negative result about the experiment as much as about $\beta$. It does not say the anchor is useless --- its job is to prevent drift over long training, and ten to fifteen epochs is early for drift --- only that this design cannot tell the arms apart, and that the previous design could not have either.
 
