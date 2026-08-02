@@ -212,6 +212,33 @@ So the conclusion is a bound rather than a bare null. Anchor strength between $0
 
 This is a negative result about the experiment as much as about $\beta$. It does not say the anchor is useless --- its job is to prevent drift over long training, and ten to fifteen epochs is early for drift --- only that this design cannot tell the arms apart, and that the previous design could not have either.
 
+\section{Drift: the anchor over a longer horizon}
+
+The comparison above ran to six epochs, which is early for the thing a data anchor is for. Its job is to keep the policy near the data manifold over long training, so a null at six epochs says little about it. Reaching twelve required fixing the reason nothing here ever ran that long: a segfault discarded all training and the run restarted from zero, so no experiment could outlast the mean time between crashes. With adapter, optimiser moments, epoch, advantage history and RNG state checkpointed every epoch, 73 crashes that previously produced about 70 curve resets became 5 crashes producing none.
+
+The follow-up was pre-registered before the runs existed, with two statistics: \code{drift}, the late-third mean minus the early-third mean, and \code{giveback}, peak minus final. The second exists because testing the first against synthetic curves of known shape showed it returns exactly zero for a run that climbs and surrenders the whole gain --- which is the SFT give-back shape and precisely the failure the anchor should prevent. The registered statistic was blind to its own target.
+
+Read once at the declared point, four seeds at $\beta{=}0$ against three at $\beta{=}0.3$, over a common twelve-epoch window:
+
+\begin{center}
+\begin{tabular}{lcccc}
+\toprule
+statistic & \code{data\_beta}$=0$ & \code{data\_beta}$=0.3$ & difference & \\
+\midrule
+drift & $+0.0007$ & $-0.0326$ & $+0.0334$, SE $0.0154$ & \textbf{2.2\,SE} \\
+giveback & $+0.0676$ & $+0.0914$ & $-0.0238$, SE $0.0229$ & 1.0\,SE \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Both point the same way, and it is the opposite of the anchor's purpose: the unanchored arm is flat late in training while the anchored one declines and gives back more of its peak.
+
+Four reasons this is not presented as established. Two statistics were registered, so under the null the chance of one exceeding $2$\,SE is $0.089$ rather than $0.045$. The anchored arm has three seeds, and a three-seed standard deviation is not a reliable one --- the same quantity read $0.0276$ from two runs against $0.0229$ from four. The statistic built for this shape, \code{giveback}, is the one that misses threshold. And it is one read, one task, one horizon. A replication on four fresh seeds per arm is running, pre-registered with its disconfirming outcome stated in advance: an opposite sign at any strength means this does not stand.
+
+One disclosure. The analysis printed ``the anchor acts where it was meant to'' for a difference of either sign, so it would have described this result backwards. That sentence was corrected after seeing the result; no threshold, statistic or inclusion rule changed.
+
+What this does establish is that the six-epoch null was not the whole story. Nothing was visible there and something is visible at twelve, which is an argument about horizon rather than about $\beta$.
+
 \section{Still open}
 
 The counting, CLIP-score, PickScore and HPS rewards all need re-measuring on fixed code, since their previous numbers came from rollouts that carried no signal. (An earlier version of this section said DiffusionDPO was still blocked on Pick-a-Pic gating, three lines after the paragraph explaining that it is not. It runs.) Two deliberate deviations are worth remembering: the log-prob is mean-reduced rather than summed, which is what makes \code{clip\_range}$=10^{-3}$ sane, and the counting reward is graded where GenEval's is binary, so those numbers are not directly comparable.
