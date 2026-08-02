@@ -286,6 +286,25 @@ would have supported a different story if quoted alone, which is why the analysi
 was pre-registered and why the verdict is the one the script prints rather than
 the one the trend suggested.
 
+**Robustness of the level result.** It has now been read four times from
+different snapshots of the rotated files, since the longest-run rule selects
+whichever run happens to be longest at read time:
+
+| read | difference | in SE |
+|---|---|---|
+| at design completion (reported above) | -0.0143 | 1.0 |
+| an hour later, longer curves | -0.0088 | 0.7 |
+| from the archived copies | -0.0101 | 1.1 |
+
+The point estimate wanders by about 0.005 but every reading returns the same
+verdict at 0.7-1.1 SE. The conclusion is robust to the read-time ambiguity even
+though the number is not, which is the more useful statement.
+
+The archive replay also had one curve rejected by the epoch-contiguity check
+(`b3s43`, 8 rows spanning epochs 0-6), a duplicate epoch left by the resume bug
+before it was fixed. The guard caught real corruption in production data rather
+than only in its own test.
+
 **A gap in the pre-registration, recorded rather than patched over.** The script
 fixed the statistic but not the moment to read it. Both the common length K and
 which run is longest per tag keep moving as runs grow, so re-running it later
