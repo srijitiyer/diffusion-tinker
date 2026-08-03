@@ -205,7 +205,35 @@ same held-out prompts. That is within one SEM, but the four same-node arms agree
 to three decimals while this differs in the second, so the variable is bf16 GEMM
 kernels differing by architecture. Arms must therefore stay on one node type.
 
-### Drift: neither the original result nor its apparent reversal survives
+### Drift, adequately powered: no effect at threshold, direction consistent
+
+Eight seeds per arm, fixed window K=12, read once at the declared point with all
+sixteen runs qualifying. Minimum detectable difference 0.0232.
+
+| statistic | data_beta 0 | data_beta 0.3 | difference | |
+|---|---|---|---|---|
+| drift (higher = less decline) | +0.0097 | -0.0115 | +0.0212, SE 0.0113 | 1.9 SE |
+| giveback (higher = surrendered more) | +0.0240 | +0.0425 | -0.0186, SE 0.0146 | 1.3 SE |
+
+**Neither crosses 2 SE, so by the pre-registered criterion this is a null.** The
+declared interpretation for that case was "no effect larger than 0.023 at this
+horizon", and the observed difference of 0.0212 sits just under the 0.0232 the
+design can resolve.
+
+What is worth stating without claiming: **both statistics agree in direction, and
+both say the anchored arm is worse** - it declines more and surrenders more of its
+peak. That is the same direction as the original 2.2 SE result, now measured at
+twice the seeds. Across four cohorts the direction has been: anchor worse (2.2 SE,
+n=4/3), nothing (0.3 SE, n=4/4), anchor worse (1.9 SE, n=8/8). The 4.2 SE reversal
+was a window artifact and never existed.
+
+So the honest summary is not "the anchor does nothing" but **"if the anchor has an
+effect on late-training degradation, it is at or below 0.02 and it makes things
+slightly worse rather than better."** Distinguishing that from zero needs roughly
+four times these seeds - about 30 per arm - which at 1.62 epochs/GPU-hour on this
+node is not a reasonable ask. Recording the bound is more useful than continuing.
+
+### Superseded readings: the original result and its apparent reversal
 
 Read once at the declared point on an independent cohort (seeds 46-49, four per
 arm, `report/driftrep_csv/`, common window K=14, `r3s48` short at 11 epochs):
