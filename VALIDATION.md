@@ -654,6 +654,31 @@ What is actually unresolved:
   is the signature of reading noise, and its absence here is why this null can be
   stated plainly.
 
+  **The data anchor is not the explanation either.** Every FLUX run on this task
+  had `data_beta=0.05`; the anchor had never been varied on FLUX, only on SD3.5.
+  Three seeds at `data_beta=0` (`fz42`/`fz43`/`fz44`), everything else matched to
+  the `fh` cohort, common six-epoch window:
+
+  | | per-seed | mean | vs 0.507 |
+  |---|---|---|---|
+  | anchor on (0.05) | 0.5022, 0.5126, 0.4672 | 0.4940 | -0.0130 |
+  | anchor off (0) | 0.4974, 0.4842, 0.4802 | 0.4873 | -0.0197 |
+
+  Difference +0.0067 at 0.5 SE. Both settle below the untrained score and the
+  anchor does not separate them - if anything the unanchored runs are marginally
+  lower, and they are tighter across seeds (SD 0.009 against 0.024), so this is
+  not a power problem concealing an effect.
+
+  **Where the FLUX question stands.** Four things checked, none of them the cause:
+  saturation (0.49 of headroom on this task), rollout size (4x the batch, same
+  result), the data anchor (off, same result), and rollout quality (train reward
+  0.44-0.58 brackets the 0.49 held-out score, so the samples carry signal). What
+  remains untested is learning rate, guidance scale, group size, and whether
+  OWLv2's gradient signal behaves differently on FLUX's output distribution than
+  on SD3.5's. The honest status is that RL under this recipe moves FLUX slightly
+  below its starting point on a task where it has room, and four plausible causes
+  have been ruled out rather than one confirmed.
+
   **Follow-up: rollout size is not the explanation, and the test hit a wall.**
   `fw42`/`fw43` repeated the run at `prompts_per_epoch=8` (48 trajectories per
   epoch, matching SD3.5) with nothing else changed. Over the same six-epoch
