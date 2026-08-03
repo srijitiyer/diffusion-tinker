@@ -608,6 +608,21 @@ What is actually unresolved:
   its own baseline. The best single point in any run is 0.538, within one
   per-point SEM (~0.07) of the start.
 
+  The conclusion does not depend on where the window is cut, which is the check
+  the drift analysis failed:
+
+  | window K | across-seed mean | vs 0.507 | |
+  |---|---|---|---|
+  | 5 | 0.4935 | -0.0135 | 0.8 SE |
+  | 6 | 0.4940 | -0.0130 | 0.9 SE |
+  | 7 | 0.4944 | -0.0126 | 1.0 SE |
+  | 8 | 0.4932 | -0.0138 | 1.3 SE |
+
+  Flat at every cut. Compare the drift result, where the verdict moved from
+  4.2 SE to 0.4 SE between K=14 and K=12 - a difference that size across windows
+  is the signature of reading noise, and its absence here is why this null can be
+  stated plainly.
+
   This closes the question the section previously called the most useful thing
   left to do, and the answer is that the headroom explanation was incomplete.
   FLUX being near its ceiling explained the flat curves on OCR and 2-5 object
