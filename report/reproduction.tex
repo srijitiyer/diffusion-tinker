@@ -256,6 +256,31 @@ So the result is a bound, not an effect: \emph{if} the anchor changes late-train
 
 Two things worth carrying forward. Turning the anchor on costs about $24\%$ of training throughput ($1.62$ against $2.12$ epochs per GPU-hour over $81$ GPU-hours), which is an ordinary consequence of an extra forward and backward per timestep and is useful for planning. And a measurement whose noise floor sits at the size of the effect will manufacture two-to-four sigma results in either direction depending when it is read; three of the four readings here did exactly that. The six-epoch null in the previous section stands as the firmer result, partly because it was read once at a fixed design point and held across four re-reads.
 
+\section{FLUX has headroom on one task and still does not climb}
+
+The headroom argument has carried a lot of weight in this report: FLUX's flat curves were explained by its starting near the ceiling of every reward tried --- $0.792$ on OCR, $0.667$ on counting 2--5 objects, $0.625$ on exact-match OCR. That explanation makes a prediction. On a task where FLUX has room, it should climb.
+
+Counting 6--9 objects is that task: untrained $0.507$. Three seeds, DDRL with the anchor at \code{data\_beta}$=0.05$, 512px, group 6, 28 steps, 13--16 epochs each. The runs were only possible because a crash no longer discards training --- every earlier attempt at this configuration died at one epoch.
+
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+window & across-seed mean & vs $0.507$ & \\
+\midrule
+$K{=}6$ & $0.4940$ & $-0.0130$ & $0.9$\,SE \\
+$K{=}8$ & $0.4932$ & $-0.0138$ & $1.3$\,SE \\
+$K{=}10$ & $0.4900$ & $-0.0170$ & $2.0$\,SE \\
+$K{=}12$ & $0.4865$ & $-0.0205$ & $2.4$\,SE \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent It does not climb. It settles about $0.015$--$0.020$ below where it started and stays there; final points are $0.479$, $0.474$ and $0.447$ against a $0.507$ baseline. The within-run trend is inconsistent across seeds ($+0.007$, $-0.053$, $+0.022$), so this is not progressive degradation --- the model moves below its starting score early and remains there.
+
+The standard error halves across those windows while the difference grows by about half, so most of the rising sigma count is precision rather than a moving quantity. That is worth distinguishing from the drift result in the previous section, where the difference itself swung by a factor of ten between windows and reversed the verdict. Here the sign and the conclusion hold at every cut.
+
+\textbf{So the saturation explanation is incomplete.} It accounted for the flat curves on tasks where FLUX was already good, and it predicted a climb here, and the prediction failed. Something else about this recipe and this model is limiting FLUX, and three seeds at 13--16 epochs is enough to establish that it does not improve without being enough to say why. That is the most useful open question this work leaves.
+
 \section{Still open}
 
 The counting, CLIP-score, PickScore and HPS rewards all need re-measuring on fixed code, since their previous numbers came from rollouts that carried no signal. (An earlier version of this section said DiffusionDPO was still blocked on Pick-a-Pic gating, three lines after the paragraph explaining that it is not. It runs.) Two deliberate deviations are worth remembering: the log-prob is mean-reduced rather than summed, which is what makes \code{clip\_range}$=10^{-3}$ sane, and the counting reward is graded where GenEval's is binary, so those numbers are not directly comparable.
