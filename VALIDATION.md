@@ -616,10 +616,16 @@ What is actually unresolved:
   | 6 | 0.4940 | -0.0130 | 0.9 SE |
   | 8 | 0.4932 | -0.0138 | 1.3 SE |
   | 10 | 0.4900 | -0.0170 | 2.0 SE |
+  | 12 | 0.4865 | -0.0205 | 2.4 SE |
 
-  Note what does and does not move: the difference sits between -0.013 and -0.017
-  at every window while the standard error falls from 0.0137 to 0.0084. The
-  SE-count rises because precision improves, not because the quantity changed.
+  The difference sits between -0.013 and -0.021 while the standard error falls
+  from 0.0137 to 0.0086. Both move, but not equally: the SE roughly halves while
+  the difference grows by about half, so most of the rise in the SE-count is
+  precision rather than a moving quantity. That is a weaker claim than I made at
+  10 points, where I said the difference was stable and only the SE improved; the
+  K=12 value of -0.021 is outside the range I quoted then, so the honest reading
+  is that the deficit is somewhere around 0.015-0.020 and may be widening slowly
+  as training continues.
   That is the opposite of the drift result, where the difference itself swung
   between windows - and it is the distinction between a measurement getting
   sharper and one being read at a lucky moment.
