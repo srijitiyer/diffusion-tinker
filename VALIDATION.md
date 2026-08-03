@@ -598,7 +598,13 @@ What is actually unresolved:
   tried - OCR 0.792, counting 0.667, exact-match OCR 0.625 - so there is nothing
   to demonstrate on. Counting 6-9 objects (untrained 0.507) is the one candidate
   with headroom and its runs were repeatedly killed before producing a curve
-  longer than seven points. This is the most useful thing left to do.
+  longer than seven points. **Now running** (`fh42`/`fh43`/`fh44`, three seeds,
+  DDRL with anchor at data_beta=0.05, 512px group 6, 28 steps): the earlier
+  attempts died at one epoch because a crash discarded the run, which is the
+  thing `resumable=True` fixes, so this is the first attempt with a mechanism to
+  survive the node. Three seeds deliberately, not sixteen - the question is
+  whether it climbs at all, and scaling a measurement before knowing there is
+  something to measure is the mistake the beta work already made.
 - **DiffusionDPO's held-out gain is not established.** Preference accuracy peaks
   at 0.610 and settles at 0.540 against chance 0.500, which is 1-2 SE on 100 fixed
   pairs. The trainer is correct and the metric is sound; the result is weak.
