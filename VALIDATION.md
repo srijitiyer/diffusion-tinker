@@ -584,12 +584,34 @@ not climb on tasks where it starts near its ceiling.
 
 ## Known gaps
 
-- **FLUX.1-dev feasibility** (does 12B + LoRA fit and train on one 48GB card) is
-  the main open question. Only atlas29 has 48GB cards; at least one is wedged, and
-  the node reads /atlas at 4.7 MB/s, so each attempt costs ~2h of model loading.
-- **DiffusionDPO** is running on an ungated mirror; no account action is needed after all.
-- Several reward rows above need re-measuring on fixed code; they are marked.
-- Deliberate deviations, not bugs: the log-prob is mean-reduced rather than
-  summed (which is what makes `clip_range=1e-3` sane), `torch.std` is
-  Bessel-corrected where the reference numpy is not (~4.5% advantage scale at
-  group 12), and the counting reward is graded where GenEval's is binary.
+Rewritten Aug 2 2026. The previous version had gone stale in a way worth naming:
+it called FLUX.1-dev feasibility "the main open question" while the Models table
+two sections above records it validated end to end, and it said several reward
+rows still needed re-measuring when all seven carry measurements on fixed code.
+Both statements were true when written and false by the time anyone would read
+them.
+
+What is actually unresolved:
+
+- **No FLUX task has shown a held-out improvement.** FLUX.1-dev trains correctly
+  (peak 36.5 GB, ratio 0.9998, exit 0) but starts near its ceiling on every task
+  tried - OCR 0.792, counting 0.667, exact-match OCR 0.625 - so there is nothing
+  to demonstrate on. Counting 6-9 objects (untrained 0.507) is the one candidate
+  with headroom and its runs were repeatedly killed before producing a curve
+  longer than seven points. This is the most useful thing left to do.
+- **DiffusionDPO's held-out gain is not established.** Preference accuracy peaks
+  at 0.610 and settles at 0.540 against chance 0.500, which is 1-2 SE on 100 fixed
+  pairs. The trainer is correct and the metric is sound; the result is weak.
+- **The anchor's effect on drift is bounded, not measured.** At or below 0.02 and
+  slightly negative; separating it from zero needs ~30 seeds per arm.
+- **atlas29's segfaults have no explanation.** Four hypotheses proposed, all
+  disproved or failed replication. The working response is to resubmit.
+
+Deliberate deviations, not bugs: the log-prob is mean-reduced rather than summed
+(which is what makes `clip_range=1e-3` sane), `torch.std` is Bessel-corrected
+where the reference numpy is not (~4.5% advantage scale at group 12), and the
+counting reward is graded where GenEval's is binary.
+
+**Cost note for planning:** `data_beta > 0` runs at 1.62 epochs/GPU-hour against
+2.12 with the anchor off, measured over 81 GPU-hours - about 24% of throughput for
+the extra forward and backward per timestep.
