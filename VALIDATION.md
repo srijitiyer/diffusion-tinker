@@ -654,6 +654,17 @@ What is actually unresolved:
   is the signature of reading noise, and its absence here is why this null can be
   stated plainly.
 
+  **Follow-up running.** The rollouts are not the problem - train reward means
+  0.44-0.58 bracket the 0.49 held-out score, so they carry signal, unlike the
+  earlier 20-step attempt where train sat at 0.083 against a 0.507 eval because
+  the images were too incoherent to count. What differs from the SD3.5 runs is
+  batch: FLUX used `prompts_per_epoch=2` x group 6 = 12 trajectories per epoch
+  against SD3.5's 4 x 12 = 48, so two prompts decided each update and train reward
+  swung 0.14-0.86 epoch to epoch. `fw42`/`fw43` repeat the run with
+  `prompts_per_epoch=8` (48 trajectories, matching SD3.5) and nothing else
+  changed. If it climbs, the limit was rollout size; if it does not, that
+  hypothesis is out and the question stays open.
+
   This closes the question the section previously called the most useful thing
   left to do, and the answer is that the headroom explanation was incomplete.
   FLUX being near its ceiling explained the flat curves on OCR and 2-5 object
