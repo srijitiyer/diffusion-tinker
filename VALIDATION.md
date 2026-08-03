@@ -654,7 +654,32 @@ What is actually unresolved:
   is the signature of reading noise, and its absence here is why this null can be
   stated plainly.
 
-  **Follow-up running.** The rollouts are not the problem - train reward means
+  **Follow-up: rollout size is not the explanation, and the test hit a wall.**
+  `fw42`/`fw43` repeated the run at `prompts_per_epoch=8` (48 trajectories per
+  epoch, matching SD3.5) with nothing else changed. Over the same six-epoch
+  window:
+
+  | rollout | per-seed means | mean | vs 0.507 |
+  |---|---|---|---|
+  | 12 traj/epoch | 0.5020, 0.5113, 0.4698 | 0.4944 | -0.013 |
+  | 48 traj/epoch | 0.4860 | 0.4860 | -0.021 |
+
+  The larger batch did what it should proximally - train reward steadied at
+  0.49-0.50 against the 0.14-0.86 swings of the small-batch runs - and the
+  held-out curve declined the same way regardless, `fw42` running
+  0.525, 0.488, 0.482, 0.477, 0.476, 0.468. So the hypothesis is not supported.
+
+  Stated with its limit: this rests on **one** completed larger-batch run. `fw43`
+  reached three points across seventeen crashes and never recovered. Quadrupling
+  the rollout made each epoch ~45 minutes instead of ~7, and since a crash costs
+  the epoch in progress, the same crash rate consumed four times more work per
+  failure - 33 crashes produced 10 points between the two runs over twelve hours.
+  The configuration that would test this properly is the one this node is least
+  able to finish, so the test was stopped rather than continued. One run pointing
+  clearly the same way as three smaller ones is suggestive, not conclusive, and
+  the honest status of *why* FLUX does not climb remains open.
+
+  **Superseded note (follow-up running):** The rollouts are not the problem - train reward means
   0.44-0.58 bracket the 0.49 held-out score, so they carry signal, unlike the
   earlier 20-step attempt where train sat at 0.083 against a 0.507 eval because
   the images were too incoherent to count. What differs from the SD3.5 runs is
