@@ -608,8 +608,33 @@ What is actually unresolved:
   its own baseline. The best single point in any run is 0.538, within one
   per-point SEM (~0.07) of the start.
 
-  The conclusion does not depend on where the window is cut, which is the check
-  the drift analysis failed:
+  **Updated at 10-12 points per run.** The effect is stable in size and the
+  precision has improved:
+
+  | window K | across-seed mean | vs 0.507 | |
+  |---|---|---|---|
+  | 6 | 0.4940 | -0.0130 | 0.9 SE |
+  | 8 | 0.4932 | -0.0138 | 1.3 SE |
+  | 10 | 0.4900 | -0.0170 | 2.0 SE |
+
+  Note what does and does not move: the difference sits between -0.013 and -0.017
+  at every window while the standard error falls from 0.0137 to 0.0084. The
+  SE-count rises because precision improves, not because the quantity changed.
+  That is the opposite of the drift result, where the difference itself swung
+  between windows - and it is the distinction between a measurement getting
+  sharper and one being read at a lucky moment.
+
+  The within-run trend is a separate question and the answer there is no: late
+  third minus early third gives +0.007, -0.053 and +0.022 across the three seeds,
+  0.4 SE. So FLUX **settles below its untrained score and stays there** rather
+  than degrading progressively. Final points are 0.488, 0.459, 0.442 against a
+  0.507 start.
+
+  This run has no declared read point - it is exploratory, not a pre-registered
+  test - so the SE-count will keep drifting as curves lengthen. The stable
+  quantity is the effect size of about -0.015, and that is what should be quoted.
+
+  The earlier reading at 7-9 points, kept for provenance:
 
   | window K | across-seed mean | vs 0.507 | |
   |---|---|---|---|
