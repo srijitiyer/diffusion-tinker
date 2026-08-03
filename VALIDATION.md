@@ -593,7 +593,30 @@ them.
 
 What is actually unresolved:
 
-- **No FLUX task has shown a held-out improvement.** FLUX.1-dev trains correctly
+- **RESOLVED, negatively: FLUX does not improve even on the task where it has
+  headroom.** Counting 6-9 objects, untrained 0.507, three seeds, DDRL with anchor
+  (data_beta=0.05, 512px, group 6, 28 steps), 7-9 epochs each:
+
+  | seed | mean(ep 1..6) | final | peak |
+  |---|---|---|---|
+  | 42 | 0.5020 | 0.497 | 0.531 |
+  | 43 | 0.5113 | 0.505 | 0.538 |
+  | 44 | 0.4698 | 0.481 | 0.507 |
+
+  Across seeds 0.4944 (SD 0.0218, SE 0.0126) against the untrained 0.507: a
+  difference of -0.013, about 1 SE. Flat, not rising, and no seed's mean exceeds
+  its own baseline. The best single point in any run is 0.538, within one
+  per-point SEM (~0.07) of the start.
+
+  This closes the question the section previously called the most useful thing
+  left to do, and the answer is that the headroom explanation was incomplete.
+  FLUX being near its ceiling explained the flat curves on OCR and 2-5 object
+  counting; here there is 0.49 of room above the untrained score and it still does
+  not climb. Whatever limits FLUX under this recipe is not only saturation. Three
+  seeds at 7-9 epochs is enough to say it does not rise, not enough to say why.
+
+- **Previously recorded here as open: no FLUX task has shown a held-out
+  improvement.** FLUX.1-dev trains correctly
   (peak 36.5 GB, ratio 0.9998, exit 0) but starts near its ceiling on every task
   tried - OCR 0.792, counting 0.667, exact-match OCR 0.625 - so there is nothing
   to demonstrate on. Counting 6-9 objects (untrained 0.507) is the one candidate
