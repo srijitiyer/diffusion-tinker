@@ -720,8 +720,28 @@ What is actually unresolved:
   `data_beta=0`. If the collapse stops, this is a real design flaw: a sparse
   reward plus a small group plus any anchor means the anchor silently takes over.
 
-  **CORRECTION (Aug 3, later): the FLUX results below are contaminated by the
-  anchor defect and the interpretations built on them are withdrawn.** Counting
+  **CORRECTION TO THE CORRECTION (Aug 4).** The contamination claim below was
+  itself over-read and is downgraded. It counted epochs where `rl_loss` printed
+  as `0.0000` and treated those as epochs where the RL term had switched off.
+  Four decimal places means `< 0.00005`, not zero - and SD3.5's own `rl_loss` runs
+  0.0001-0.0003, barely above the print threshold. So "the RL term was off in 70%
+  of FLUX epochs" conflated *prints as zero* with *switched off*, and the
+  frequency table does not support the stronger reading.
+
+  What is still solid is the OCR case, where the arithmetic distinguishes:
+  `total_loss` 0.0223 against `data_loss` 0.4452 gives `0.05 * 0.4452 = 0.022260`,
+  which prints as 0.0223, whereas a `rl_loss` of 0.0001 would print 0.0224. There
+  the RL term really was negligible and the anchor really was the whole gradient.
+  That case also had a collapsed reward (0.083), which is the condition under
+  which uniform groups are expected.
+
+  So: the anchor defect is real and the fix stands, confirmed by a prediction
+  that held on three seeds. The claim that it contaminated the *counting* runs is
+  not established, and the learning-rate withdrawal below rests on it. Both are
+  left recorded rather than deleted, because the sequence - finding, correction,
+  correction of the correction - is the useful part.
+
+  **[DOWNGRADED] The FLUX results below are contaminated by the anchor defect.** Counting
   the epochs where `rl_loss` printed as exactly zero:
 
   | run | epochs with rl_loss = 0 |
