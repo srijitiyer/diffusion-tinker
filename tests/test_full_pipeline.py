@@ -697,10 +697,23 @@ def test_all_trainers_guard_their_regulariser():
             f"{trainer.__name__} never computes has_signal, so it cannot tell "
             "whether its regulariser is the only thing training the model"
         )
-        assert "advantages.std().item() > 1e-6" in src, (
-            f"{trainer.__name__} must test advantage spread, not a nonzero count: "
-            "a group can hold several nonzero but internally identical values"
-        )
+        # The right test differs by estimator and getting it wrong is silent.
+        # Group-normalized trainers subtract the group mean, so zero spread
+        # implies all-zero and a spread test is correct. DDPO normalizes against
+        # a per-prompt history and can produce constant nonzero advantages -
+        # "all of these beat this prompt's average" - which is a real signal a
+        # spread test would discard.
+        if trainer is DDPOTrainer:
+            assert "advantages.abs().max().item() > 1e-6" in src, (
+                "DDPO must test advantage magnitude; a spread test would skip "
+                "constant-nonzero advantages, which are a genuine signal for a "
+                "history-normalized estimator"
+            )
+        else:
+            assert "advantages.std().item() > 1e-6" in src, (
+                f"{trainer.__name__} must test advantage spread, not a nonzero "
+                "count: a group can hold several nonzero but identical values"
+            )
 
     # and each must actually act on it
     assert "if not has_signal:" in inspect.getsource(FlowGRPOTrainer._training_step)

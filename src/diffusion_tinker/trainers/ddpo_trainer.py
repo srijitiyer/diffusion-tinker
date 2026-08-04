@@ -69,7 +69,16 @@ class DDPOTrainer(BaseDiffusionTrainer):
             # here, since a KL to the reference pulls back toward the starting
             # point rather than toward a different distribution, but it still
             # applies a regulariser to a batch that cannot teach anything.
-            has_signal = trajectory.advantages is not None and trajectory.advantages.std().item() > 1e-6
+            # Magnitude, not spread. DDPO normalises against a per-prompt reward
+            # history rather than within the batch, so it can legitimately produce
+            # constant nonzero advantages - "all of these beat this prompt's
+            # average" is a real signal and must not be skipped. A spread test
+            # would discard it. For the group-normalised trainers spread is the
+            # right test, because zero spread there implies all-zero.
+            has_signal = (
+                trajectory.advantages is not None
+                and trajectory.advantages.abs().max().item() > 1e-6
+            )
 
             for sl in minibatches:
                 self.optimizer.zero_grad()
