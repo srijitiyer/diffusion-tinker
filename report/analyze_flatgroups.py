@@ -38,30 +38,19 @@ numbers were widened from the 46 epochs first sampled to all 194 on disk, where
 Advantage spread is not logged anywhere. Deciding this properly needs that field
 recorded during a run; it cannot be recovered afterwards from what is on disk.
 
-The measure. Each epoch line logs `per_prompt`, the mean reward over that
-prompt's group of rollouts. Advantages are computed within a group, so a group
-whose rollouts all scored the same contributes nothing regardless of what they
-scored. For a reward bounded on [0, 1], a group mean of exactly 0.00 or exactly
-1.00 can only arise when every rollout in it scored identically. So:
+What it computes, so the numbers it prints can be read for what they are worth.
+Each epoch line logs `per_prompt`, a group's mean reward. Advantages are computed
+within a group, so a group whose rollouts all scored the same contributes nothing.
+For a reward bounded on [0, 1] a group mean at exactly 0.00 or 1.00 would imply
+every rollout scored identically - which would be exact at full precision and is
+not at the two decimals actually logged. The per-group column is therefore a
+rough indicator and the batch-level column is uninformative, since a single group
+printing an interior value in an epoch is enough to make that epoch look live.
 
-    flat fraction = share of prompt-groups pinned at 0.00 or 1.00
-
-For a binary reward this is exact: mean 0 iff all zero, mean 1 iff all one. For
-a graded reward it is a lower bound, since a graded group can be flat at an
-interior value too. The bound runs in the conservative direction for the
-question being asked - graded rewards can only be flatter than measured, so if
-graded rewards still come out much less flat than sparse ones, the gap is real.
-
-What would distinguish the two explanations:
-
-  - Flatness tracks the reward and not the model (SD3.5 flat on exact-match OCR,
-    FLUX not flat on a graded reward) -> the 0-of-18 figure measured the reward,
-    the confound is real, and the corrected claim needs correcting again.
-  - Flatness tracks the model regardless of reward -> the correction stands as
-    written and this file records a failed challenge to it.
-  - Cells missing -> say so. The confound is only resolvable where both models
-    have been run on both reward types.
+Run against `epochs.txt.gz`, the extracted epoch lines from every run on disk at
+the time of writing, committed so the numbers above can be checked.
 """
+import gzip
 import os
 import re
 import sys
@@ -93,8 +82,9 @@ def reward_kind(name):
 
 
 def main(path):
+    opener = gzip.open if path.endswith(".gz") else open
     cells = defaultdict(lambda: {"flat": 0, "total": 0, "quiet": 0, "epochs": 0, "runs": set()})
-    for raw in open(path):
+    for raw in opener(path, "rt"):
         m = LINE.match(raw.strip())
         if not m:
             continue
@@ -172,4 +162,4 @@ def main(path):
 
 if __name__ == "__main__":
     main(sys.argv[1] if len(sys.argv) > 1 else
-         os.path.join(os.path.dirname(__file__), "epochs.txt"))
+         os.path.join(os.path.dirname(__file__), "epochs.txt.gz"))
