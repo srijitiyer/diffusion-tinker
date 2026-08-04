@@ -355,7 +355,8 @@ measurable difference on counting. Tested directly - `ocr_exact` at
 Identical at K=4 and diverging after, which is the shape the mechanism predicts:
 the advantages only vanish once the reward has fallen far enough. All three
 unanchored seeds held at baseline with SD 0.006; all three anchored seeds
-collapsed.
+collapsed. The decline does not bottom out: the longest anchored run reached
+0.167 by epoch 15 against an untrained 0.625.
 
 This is model-independent. Any sparse or binary reward at a small group size will
 hit it. The tell is `total_loss` printing as exactly `data_beta * data_loss`.

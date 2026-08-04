@@ -689,7 +689,8 @@ What is actually unresolved:
   predicts: the advantages only vanish once the reward has fallen far enough for
   groups to become uniform, so the anchor cannot dominate until then. All three
   unanchored seeds hold at the 0.625 baseline with SD 0.006; all three anchored
-  seeds collapse to 0.250-0.375.
+  seeds collapse, and the collapse does not plateau - `fo42` reached 0.167 by
+  epoch 15, a 73% relative fall from its untrained 0.625.
 
   **And with the anchor gated, FLUX stops degrading.** At K=7 the arms read 0.4965
   anchored against 0.6389 unanchored, and the unanchored latest points are 0.625,
