@@ -310,6 +310,56 @@ Relatedly, eval ran every 2 epochs, so 8 points needed roughly 4.3 uninterrupted
 hours. Eval costs about a third of an epoch here, so moving to every epoch is
 ~17% more compute to halve the window a usable curve requires.
 
+## 10d. The data anchor trains alone when the reward goes sparse
+
+Found Aug 3 2026, and the only defect since the audit that would silently degrade
+a user's run rather than merely mislead a measurement.
+
+`ocr_exact` on FLUX collapsed from an untrained 0.625 to 0.29 across three seeds.
+The training reward collapsed with it, 0.75 to 0.08, which rules out overfitting -
+the policy was getting worse at the objective it optimises, on its own training
+distribution. One log line gives the mechanism:
+
+```
+Epoch 5 | reward=0.083 | rl_loss=0.0000 | data_loss=0.4452
+        | total_loss=0.0223 | mean_ratio=0.9999
+```
+
+`total_loss` is exactly `data_beta * data_loss`. The RL term has gone to zero and
+the anchor is the entire gradient.
+
+`ocr_exact` is binary, so at group size 6 all six samples in a group frequently
+score the same. The group-normalised advantage then has no within-group variance,
+`has_signal` is false, `rl_loss` is set to zero - and `data_beta * data_loss` was
+applied anyway. The anchor pulls toward the anchor images, which costs task
+performance, which makes groups more uniform, which keeps the RL term off. It
+compounds.
+
+The existing zero-signal guard did not catch it. `BaseDiffusionTrainer` skips an
+epoch when fewer than two advantages are nonzero; that is a different condition
+from their having no spread, and a group can hold several nonzero but internally
+uniform values.
+
+**Fix.** The anchor term is now gated on `has_signal`. Confirmed by prediction
+rather than after the fact: the mechanism implies the anchor should matter for
+binary rewards and not for graded ones, which is why `data_beta` had made no
+measurable difference on counting. Tested directly - `ocr_exact` at
+`data_beta=0`, three seeds, everything else matched:
+
+| window | anchor on | anchor off | |
+|---|---|---|---|
+| K=4 | 0.6112 | 0.6157 | 0.1 SE |
+| K=5 | 0.5591 | 0.6284 | 2.0 SE |
+| K=6 | 0.5250 | 0.6374 | 3.1 SE |
+
+Identical at K=4 and diverging after, which is the shape the mechanism predicts:
+the advantages only vanish once the reward has fallen far enough. All three
+unanchored seeds held at baseline with SD 0.006; all three anchored seeds
+collapsed.
+
+This is model-independent. Any sparse or binary reward at a small group size will
+hit it. The tell is `total_loss` printing as exactly `data_beta * data_loss`.
+
 ## 11. Conclusions this invalidates
 
 Do not reuse these:
