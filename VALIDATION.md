@@ -205,6 +205,45 @@ same held-out prompts. That is within one SEM, but the four same-node arms agree
 to three decimals while this differs in the second, so the variable is bf16 GEMM
 kernels differing by architecture. Arms must therefore stay on one node type.
 
+### The anchor helps when the RL term is live, and only then
+
+The beta work found no effect of `data_beta` on counting, at two horizons and up
+to eight seeds per arm. That turns out to be a statement about the reward, not
+about the anchor. On a **sparse** reward the anchor does something measurable,
+and its sign depends on whether the policy-gradient term is contributing at all.
+
+SD3.5 with `ocr_exact` (untrained 0.375, group 6, two seeds per arm):
+
+| | K=5 mean | latest points |
+|---|---|---|
+| anchor 0.05 | 0.4582 | 0.417, 0.500 |
+| anchor 0 | 0.3491 | 0.292, 0.417 |
+
+A difference of +0.109 at 2.6 SE, with the anchor **helping** - and one unanchored
+seed degrading to 0.125 at its worst. Two seeds per arm makes that SE soft, but
+the direction is consistent and it is the first positive evidence in this project
+that `data_beta` does anything.
+
+FLUX with the identical reward and group size ran the other way: anchored
+collapsed to 0.29, unanchored held 0.625. The distinguishing variable is whether
+the RL term is live. SD3.5 never lost it (0 of 18 epochs); FLUX lost it in 22 of
+28. So:
+
+- **RL term live** - the anchor regularises toward the data manifold and helps,
+  which is what it is for.
+- **RL term quiet** - the anchor is the only gradient and walks the policy away
+  from the task.
+
+That is exactly the behaviour the fix produces by gating the anchor on
+`has_signal`: keep it where it earns its place, drop it where it would be acting
+alone. The gate was written from the FLUX failure before this SD3.5 result
+existed, so this is confirmation rather than justification.
+
+Why counting showed nothing: it is graded, its advantages never vanish, so the
+anchor is always in the "live" regime - and there its measured effect is under
+0.02, which is the beta null. Both results are consistent; the sweep simply
+picked the reward where the anchor has least to do.
+
 ### Drift, adequately powered: no effect at threshold, direction consistent
 
 Eight seeds per arm, fixed window K=12, read once at the declared point with all
