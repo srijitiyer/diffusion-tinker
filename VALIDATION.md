@@ -720,7 +720,41 @@ What is actually unresolved:
   `data_beta=0`. If the collapse stops, this is a real design flaw: a sparse
   reward plus a small group plus any anchor means the anchor silently takes over.
 
-  **The likely answer: the gradient is harmful, not absent.** Learning rate was
+  **CORRECTION (Aug 3, later): the FLUX results below are contaminated by the
+  anchor defect and the interpretations built on them are withdrawn.** Counting
+  the epochs where `rl_loss` printed as exactly zero:
+
+  | run | epochs with rl_loss = 0 |
+  |---|---|
+  | FLUX counting, lr 3e-5 | 11/15, 8/12, 12/16 |
+  | FLUX counting, lr 2e-4 | 5/9, 3/7, 6/8 |
+  | SD3.5 counting (`hb0`, `hb03`) | **0/25, 0/20** |
+
+  On FLUX the RL term was off in roughly 70% of epochs; on SD3.5 it never switched
+  off at all. Those FLUX runs were therefore trained mostly by the anchor, which
+  pulls toward the anchor images - so "FLUX does not climb" was substantially a
+  measurement of the defect rather than of FLUX.
+
+  The cause is group size. FLUX ran at group 6 because of memory; SD3.5 ran at 12.
+  The counting reward is graded but heavily zero-inflated, since the detector
+  frequently finds nothing, so with only six samples a group often scores
+  uniformly and the advantage vanishes.
+
+  What this withdraws:
+  - **The learning-rate dose-response.** Both arms were heavily affected (43-75%
+    of epochs), so the comparison was between two differently-contaminated runs,
+    not between learning rates. The window-stability that made it look solid does
+    not rescue it - a confound can be perfectly stable.
+  - **"The gradient is harmful, not absent."** The gradient was largely absent.
+  - **The saturation and rollout-size eliminations** are unaffected in their own
+    terms but were interpreting a contaminated baseline.
+
+  What survives: the anchor defect itself, which is confirmed by a prediction that
+  held, and the fix. And the observation that FLUX at group 6 cannot reliably
+  produce within-group variance on these rewards, which is a real constraint worth
+  knowing independently.
+
+  **[WITHDRAWN] The likely answer: the gradient is harmful, not absent.** Learning rate was
   the last cheap variable. Three seeds at `lr 2e-4` against the `fh` cohort's
   `3e-5`, everything else matched, held-out mean over epochs 1-4:
 
