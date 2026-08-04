@@ -774,6 +774,24 @@ What is actually unresolved:
   produce within-group variance on these rewards, which is a real constraint worth
   knowing independently.
 
+  **The group-12 test is not completable on this hardware, and that is itself a
+  finding.** FLUX at group 12 with the anchor fix produced 4, 3 and 2 eval points
+  in five hours before being stopped - one epoch still unfinished after 95
+  minutes. Doubling the group doubles the rollout, and against an unchanged crash
+  rate each failure costs twice as much work. Second configuration to hit this
+  wall; the `prompts_per_epoch=8` test managed 10 points across 33 crashes in
+  twelve hours.
+
+  Partial curves before stopping: 0.521, 0.491, 0.537 / 0.521, 0.542 / 0.504
+  against a 0.507 baseline - at or slightly above, where the group-6 runs were
+  already below by this stage. Suggestive only; two to four points per seed is not
+  a result and is not recorded as one.
+
+  The constraint is worth stating for anyone planning FLUX RL on a 48GB card:
+  group 6 fits comfortably but produces frequent uniform groups on these rewards,
+  group 12 fits but makes epochs slow enough that an unstable node cannot finish
+  them. That is a real corner rather than a tuning preference.
+
   **[WITHDRAWN] The likely answer: the gradient is harmful, not absent.** Learning rate was
   the last cheap variable. Three seeds at `lr 2e-4` against the `fh` cohort's
   `3e-5`, everything else matched, held-out mean over epochs 1-4:
