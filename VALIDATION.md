@@ -243,14 +243,15 @@ seed with five seeds per arm:
 | K=5 | 0.4667 | 0.3834 | +0.083 | 2.8 SE | 23/25 |
 | K=7 | 0.4653 | 0.3737 | +0.092 | 2.6 SE | 23/25 |
 | K=9 | 0.4750 | 0.3730 | +0.102 | 2.9 SE | 23/25 |
+| K=12 | 0.4795 | 0.3826 | +0.097 | 3.0 SE | 23/25 |
 
 The effect size grows slightly with the window rather than swinging, the SE sits
 at 2.6-2.9 throughout, and the rank separation is identical at all three cuts.
 That combination is what none of this project's withdrawn findings had: the drift
 result moved 4.2 SE to 0.4 SE between adjacent windows, and the FLUX
-learning-rate result held its SE while being confounded. Per-seed at K=9,
-anchored 0.427, 0.427, 0.500, 0.500, 0.521 against unanchored 0.271, 0.375,
-0.380, 0.391, 0.448.
+learning-rate result held its SE while being confounded. Per-seed at K=12, anchored 0.428, 0.443, 0.500, 0.504, 0.523 against unanchored
+0.299, 0.371, 0.383, 0.398, 0.462. The worst anchored seed (0.428) sits above
+four of the five unanchored, and well above the worst (0.299).
 
 **What this does not say.** The anchor is not necessary for the task to work.
 `sb44`, unanchored, reaches 0.500 and 0.583 late in its run, and one anchored
