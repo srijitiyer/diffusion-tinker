@@ -358,8 +358,32 @@ unanchored seeds held at baseline with SD 0.006; all three anchored seeds
 collapsed. The decline does not bottom out: the longest anchored run reached
 0.167 by epoch 15 against an untrained 0.625.
 
-This is model-independent. Any sparse or binary reward at a small group size will
-hit it. The tell is `total_loss` printing as exactly `data_beta * data_loss`.
+**Correction to the scope.** This was first written as "model-independent - any
+sparse or binary reward at a small group size will hit it". That is wrong.
+SD3.5 with the identical reward, group size and recipe never reaches the
+condition:
+
+| model | reward | group | epochs with the RL term quiet |
+|---|---|---|---|
+| FLUX.1-dev | `ocr_exact` | 6 | 12/16, 10/12 |
+| SD3.5-medium | `ocr_exact` | 6 | 0/4, 0/4, 0/5, 0/5 |
+
+And the outcomes invert with it: on SD3.5 the *anchored* runs rise (0.375 to
+0.458-0.500) while an unanchored one falls, the reverse of FLUX.
+
+So the defect is a real code path - applying a regulariser to a batch with no
+learning signal is wrong wherever it happens - but reaching it requires a model
+whose within-group samples score identically. FLUX at group 6 does; SD3.5 does
+not, across 18 epochs of the same configuration. The fix is still correct and
+still worth having; the claim about who will encounter it was too broad.
+
+This also points at what is actually different about FLUX: its rollouts at
+noise 0.7 are far less diverse than SD3.5's, so a group of six lands on the same
+reward. That is a property of the sampler and the model rather than of the
+reward, and it suggests exploration noise as the lever - untested, because the
+runs that would have tested it were blocked by node contention.
+
+The tell in a log is `total_loss` printing as exactly `data_beta * data_loss`.
 
 ## 11. Conclusions this invalidates
 
