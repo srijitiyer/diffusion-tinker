@@ -630,6 +630,46 @@ def test_resume_is_transparent():
     print("  resume is transparent: OK")
 
 
+def test_anchor_off_when_no_rl_signal():
+    """The anchor must not train alone when the RL term has switched off.
+
+    A sparse or binary reward at a small group size regularly produces groups
+    where every sample scores the same, so the group-normalized advantage has no
+    within-group variance, `has_signal` is false, and `rl_loss` is set to zero.
+    Applying `data_beta * data_loss` on its own then makes the anchor the entire
+    gradient, which walks the policy toward the anchor images and away from the
+    task - and it compounds, because a worse policy makes groups more uniform.
+
+    Measured on FLUX with exact-match OCR at group 6: held-out fell 0.625 to 0.29
+    with the anchor on and held at 0.625 with it off, 3.1 SE apart. The tell in
+    the logs is `total_loss` printing as exactly `data_beta * data_loss` with
+    `rl_loss` at zero.
+
+    The pre-existing zero-signal guard in BaseDiffusionTrainer does not cover
+    this: it skips an epoch only when fewer than two advantages are nonzero,
+    which is a different condition from their having no spread.
+    """
+    import inspect
+
+    from diffusion_tinker.trainers.ddrl_trainer import DDRLTrainer
+
+    src = inspect.getsource(DDRLTrainer._training_step)
+
+    assert "if config.data_beta > 0 and has_signal:" in src, (
+        "the data-anchor term must be gated on has_signal; without it the anchor "
+        "becomes the only gradient whenever the reward goes sparse"
+    )
+
+    # and the guard it relies on must still be the spread test, not a count
+    outer = inspect.getsource(DDRLTrainer)
+    assert "advantages.std().item() > 1e-6" in outer, (
+        "has_signal must test advantage spread; a nonzero-count test would pass "
+        "on groups that are internally uniform"
+    )
+
+    print("  anchor gated on rl signal: OK")
+
+
 def test_reward_resolve():
     """Test reward registry and resolution."""
     # String resolution

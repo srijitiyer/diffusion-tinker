@@ -209,7 +209,17 @@ class DDRLTrainer(BaseDiffusionTrainer):
                     ratio = torch.tensor(1.0, device=device)
 
                 data_loss = torch.tensor(0.0, device=device)
-                if config.data_beta > 0:
+                # Only anchor when the RL term is actually contributing. If the
+                # advantages carry no within-group variance, has_signal is false
+                # and rl_loss is zero - and applying the anchor alone makes the
+                # anchor the entire gradient, which walks the policy toward the
+                # anchor images and away from the task. Measured on FLUX with a
+                # binary reward at group 6: held-out exact-match OCR fell 0.625 ->
+                # 0.29 with the anchor on and held at 0.625 with it off, 3.1 SE
+                # apart, while `total_loss` printed as exactly data_beta *
+                # data_loss. It compounds, because a worse policy makes groups
+                # more uniform, which keeps the RL term off.
+                if config.data_beta > 0 and has_signal:
                     u = torch.normal(mean=config.logit_mean, std=config.logit_std, size=(mb_batch_size,), device=device)
                     t = torch.sigmoid(u)
 
