@@ -60,9 +60,23 @@ class DDPOTrainer(BaseDiffusionTrainer):
             perm = torch.randperm(batch_size, device=device)
             minibatches = [perm[s:s + mb_size] for s in range(0, batch_size, mb_size)]
 
+            # Skip the update when the advantages carry no spread. FlowGRPO does
+            # this by continuing past the timestep and DDRL by gating its anchor;
+            # DDPO had neither, so its DPOK KL term would keep pulling the policy
+            # toward the reference with no learning signal opposing it - the same
+            # shape of defect that let DDRL's anchor become the whole gradient and
+            # walk held-out exact-match OCR from 0.625 to 0.167. Less destructive
+            # here, since a KL to the reference pulls back toward the starting
+            # point rather than toward a different distribution, but it still
+            # applies a regulariser to a batch that cannot teach anything.
+            has_signal = trajectory.advantages is not None and trajectory.advantages.std().item() > 1e-6
+
             for sl in minibatches:
                 self.optimizer.zero_grad()
                 mb = trajectory[sl]
+
+                if not has_signal:
+                    continue
 
                 for j in timestep_indices:
                     sigma = mb.timesteps[j]

@@ -670,6 +670,46 @@ def test_anchor_off_when_no_rl_signal():
     print("  anchor gated on rl signal: OK")
 
 
+def test_all_trainers_guard_their_regulariser():
+    """No trainer may apply its regulariser to a batch with no RL signal.
+
+    This is one defect shape appearing in three places. When the advantages have
+    no spread there is nothing to learn from, and any regularisation term applied
+    anyway becomes the entire gradient. Measured on DDRL: held-out exact-match OCR
+    fell 0.625 to 0.167 while the training reward fell 0.75 to 0.08, because the
+    data anchor kept pulling toward the anchor images after the PPO term went
+    quiet.
+
+    Each trainer defends differently, which is why this checks behaviour rather
+    than a shared helper. FlowGRPO skips the timestep, DDRL gates its anchor,
+    DDPO skips the minibatch. DDPO had no guard at all until this was found -
+    its DPOK KL is off by default, so nothing had exercised it.
+    """
+    import inspect
+
+    from diffusion_tinker.trainers.ddpo_trainer import DDPOTrainer
+    from diffusion_tinker.trainers.ddrl_trainer import DDRLTrainer
+    from diffusion_tinker.trainers.flowgrpo_trainer import FlowGRPOTrainer
+
+    for trainer in (FlowGRPOTrainer, DDRLTrainer, DDPOTrainer):
+        src = inspect.getsource(trainer._training_step)
+        assert "has_signal" in src, (
+            f"{trainer.__name__} never computes has_signal, so it cannot tell "
+            "whether its regulariser is the only thing training the model"
+        )
+        assert "advantages.std().item() > 1e-6" in src, (
+            f"{trainer.__name__} must test advantage spread, not a nonzero count: "
+            "a group can hold several nonzero but internally identical values"
+        )
+
+    # and each must actually act on it
+    assert "if not has_signal:" in inspect.getsource(FlowGRPOTrainer._training_step)
+    assert "if not has_signal:" in inspect.getsource(DDPOTrainer._training_step)
+    assert "config.data_beta > 0 and has_signal" in inspect.getsource(DDRLTrainer._training_step)
+
+    print("  all trainers guard their regulariser: OK")
+
+
 def test_reward_resolve():
     """Test reward registry and resolution."""
     # String resolution
