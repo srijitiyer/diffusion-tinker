@@ -865,6 +865,13 @@ What is actually unresolved:
   already below by this stage. Suggestive only; two to four points per seed is not
   a result and is not recorded as one.
 
+  A fourth attempt on a single free card got further and still produced nothing:
+  the 32GB of model blobs streamed in four hours (against a ~113 minute estimate
+  at this node's nominal 4.7 MB/s), `PREWARM_DONE` was reached, and the job then
+  spent another hour stuck in Python imports - the prewarm covers model blobs but
+  not the venv, so torch's 1.6GB and nvidia's 2.7GB demand-page off the same
+  filesystem. Five hours, zero training epochs, stopped.
+
   A third attempt, raising exploration noise to 1.0 at group 6 - the one lever
   that costs neither memory nor time and directly controls within-group sample
   diversity - could not be evaluated either, for a reason unrelated to the
