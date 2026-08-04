@@ -691,6 +691,19 @@ What is actually unresolved:
   unanchored seeds hold at the 0.625 baseline with SD 0.006; all three anchored
   seeds collapse to 0.250-0.375.
 
+  **And with the anchor gated, FLUX stops degrading.** At K=7 the arms read 0.4965
+  anchored against 0.6389 unanchored, and the unanchored latest points are 0.625,
+  0.708, 0.625 - mean 0.653 against a 0.625 baseline. Not a climb (0.5 SE, and
+  `ocr_exact` quantises to k/24 so the per-point SEM is ~0.10), but it is the
+  first configuration in the entire FLUX investigation that does not go down.
+
+  That is worth stating carefully against the section above. The earlier finding -
+  that FLUX degrades in proportion to learning rate on *counting* - stands: those
+  runs used a graded reward whose advantages never vanish, so the anchor was not
+  the cause there and the fix does not address them. What the fix removes is a
+  separate and much larger failure that only appears with sparse rewards. Two
+  different problems, one now solved.
+
   **This is a library defect, not a FLUX quirk.** With a sparse reward and a small
   group, `has_signal` goes false, `rl_loss` is set to zero - and the trainer keeps
   applying `data_beta * data_loss` anyway. The zero-signal guard in
