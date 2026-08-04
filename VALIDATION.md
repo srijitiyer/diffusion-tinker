@@ -654,6 +654,34 @@ What is actually unresolved:
   is the signature of reading noise, and its absence here is why this null can be
   stated plainly.
 
+  **A second reward collapses far harder, and the mechanism is visible in the
+  logs.** `ocr_exact` on FLUX (untrained 0.625, three seeds, anchor 0.05,
+  everything else matched) falls to 0.333, 0.375, 0.333 - roughly -0.28 where the
+  per-point SEM is 0.10. Counting moved only -0.013 under the same anchor, so
+  this is an order of magnitude larger.
+
+  The training reward collapses too (0.75 -> 0.08 on one seed), which rules out
+  overfitting: the policy is getting worse at the objective it optimises, on its
+  own training distribution. The log shows why:
+
+  ```
+  Epoch 5 | reward=0.083 | rl_loss=0.0000 | data_loss=0.4452
+          | total_loss=0.0223 | mean_ratio=0.9999
+  ```
+
+  `total_loss` is exactly `0.05 * data_loss`. The RL term has gone to zero and
+  the anchor is the only gradient still training the model. `ocr_exact` is binary,
+  so at group size 6 all six samples in a group frequently score the same, the
+  group-normalised advantage vanishes, and `rl_loss` goes with it - while the
+  anchor keeps pulling toward generic anchor images regardless. The worse it gets,
+  the more uniform the groups become, so it compounds.
+
+  That also explains why turning the anchor off changed nothing on counting:
+  counting is graded, its advantages do not vanish, and the RL term keeps working.
+  `fn42`/`fn43`/`fn44` test the prediction directly - `ocr_exact` at
+  `data_beta=0`. If the collapse stops, this is a real design flaw: a sparse
+  reward plus a small group plus any anchor means the anchor silently takes over.
+
   **The likely answer: the gradient is harmful, not absent.** Learning rate was
   the last cheap variable. Three seeds at `lr 2e-4` against the `fh` cohort's
   `3e-5`, everything else matched, held-out mean over epochs 1-4:
