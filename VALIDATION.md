@@ -654,6 +654,35 @@ What is actually unresolved:
   is the signature of reading noise, and its absence here is why this null can be
   stated plainly.
 
+  **The likely answer: the gradient is harmful, not absent.** Learning rate was
+  the last cheap variable. Three seeds at `lr 2e-4` against the `fh` cohort's
+  `3e-5`, everything else matched, held-out mean over epochs 1-4:
+
+  | learning rate | held-out mean | vs untrained | SE |
+  |---|---|---|---|
+  | 0 (untrained) | 0.5070 | - | - |
+  | 3e-5 | 0.4935 | -0.0135 | 0.0169 |
+  | 2e-4 | 0.4473 | -0.0597 | 0.0049 |
+
+  Monotonic: more optimisation, further below baseline, with the high-rate arm
+  tight across seeds. That is a dose-response rather than a tuning miss, and it
+  changes the question. FLUX is not failing to learn - it is learning something
+  that costs held-out counting accuracy, in proportion to how hard the gradient
+  is followed. "The adapter barely moves at a rate tuned for a 2.5B model" is
+  ruled out; the policy responds to the learning rate strongly and in the wrong
+  direction.
+
+  So the remaining suspect is the reward signal itself: whether OWLv2's gradient
+  on FLUX's output distribution points somewhere useful. On SD3.5 the same reward
+  and recipe climb (0.541 to ~0.60 across the beta arms). The natural next test
+  is a different reward on FLUX with everything else fixed - if OCR or aesthetic
+  climbs where counting degrades, the detector is implicated; if every reward
+  degrades, it is the model or the sampler.
+
+  Two seeds' caveat: this is three seeds at two learning rates plus the untrained
+  point, five epochs each. A dose-response on two doses is suggestive, not
+  established, and a third rate would test it properly.
+
   **The data anchor is not the explanation either.** Every FLUX run on this task
   had `data_beta=0.05`; the anchor had never been varied on FLUX, only on SD3.5.
   Three seeds at `data_beta=0` (`fz42`/`fz43`/`fz44`), everything else matched to
