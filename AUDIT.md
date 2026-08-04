@@ -360,22 +360,33 @@ collapsed. The decline does not bottom out: the longest anchored run reached
 
 **Correction to the scope.** This was first written as "model-independent - any
 sparse or binary reward at a small group size will hit it". That is wrong.
-SD3.5 with the identical reward, group size and recipe never reaches the
-condition:
+SD3.5 with the identical reward, group size and recipe reaches the condition far
+less often, over every matched run on disk rather than the four sampled first:
 
-| model | reward | group | epochs with the RL term quiet |
-|---|---|---|---|
-| FLUX.1-dev | `ocr_exact` | 6 | 12/16, 10/12 |
-| SD3.5-medium | `ocr_exact` | 6 | 0/4, 0/4, 0/5, 0/5 |
+| model | reward | group | epochs printing `rl_loss=0.0000` | of |
+|---|---|---|---|---|
+| FLUX.1-dev | `ocr_exact` | 6 | at most 53 | 59 |
+| SD3.5-medium | `ocr_exact` | 6 | at most 12 | 135 |
+
+These are upper bounds, not counts. Four decimals means `< 0.00005`: a quiet
+epoch does force `rl_loss` to exactly zero, so quiet implies a printed `0.0000`,
+but a live epoch with a small value prints it too. `rl_loss` also tracks the mean
+advantage rather than the spread, and group normalisation centres advantages, so
+it is not the quantity `has_signal` tests. An earlier version of this table read
+"0/4, 0/4, 0/5, 0/5" against "12/16, 10/12" and concluded SD3.5 *never* reaches
+the condition; on the full set it does, in 12 epochs. The asymmetry is large and
+holds in direction - which is what the mechanism argument needs - but it is
+evidence from a proxy, not a measurement.
 
 And the outcomes invert with it: on SD3.5 the *anchored* runs rise (0.375 to
 0.458-0.500) while an unanchored one falls, the reverse of FLUX.
 
 So the defect is a real code path - applying a regulariser to a batch with no
-learning signal is wrong wherever it happens - but reaching it requires a model
-whose within-group samples score identically. FLUX at group 6 does; SD3.5 does
-not, across 18 epochs of the same configuration. The fix is still correct and
-still worth having; the claim about who will encounter it was too broad.
+learning signal is wrong wherever it happens - but reaching it often appears to
+require a model whose within-group samples score identically. FLUX at group 6
+does so far more than SD3.5, which is the asymmetry above. The fix is still
+correct and still worth having; the claim about who will encounter it was too
+broad, and how much more often remains bounded rather than measured.
 
 This also points at what is actually different about FLUX: its rollouts at
 noise 0.7 are far less diverse than SD3.5's, so a group of six lands on the same

@@ -723,6 +723,54 @@ def test_all_trainers_guard_their_regulariser():
     print("  all trainers guard their regulariser: OK")
 
 
+def test_trainers_log_the_statistic_they_gate_on():
+    """Every RL trainer must report advantage spread, not just its mean.
+
+    This exists because a claim was built on the wrong field. Quiet-epoch counts
+    for FLUX and SD3.5 were read off `rl_loss` printing as `0.0000`, and that is
+    the mean advantage in disguise: `rl_loss` sits at `-mean_advantage` to four
+    decimals across every log on disk, and group normalisation centres the
+    advantages, so the mean is near zero whether or not the spread is. A quiet
+    epoch and a live one both print `0.0000`, and four decimals only says
+    `< 0.00005` in any case. The counts written down as measurements were upper
+    bounds.
+
+    Logging the gated statistic makes it decidable from a log instead of
+    inferred from a proxy that cannot carry the inference.
+    """
+    import inspect
+
+    from diffusion_tinker.trainers.ddpo_trainer import DDPOTrainer
+    from diffusion_tinker.trainers.ddrl_trainer import DDRLTrainer
+    from diffusion_tinker.trainers.flowgrpo_trainer import FlowGRPOTrainer
+
+    for trainer in (FlowGRPOTrainer, DDRLTrainer, DDPOTrainer):
+        src = inspect.getsource(trainer._training_step)
+        # Each logs the statistic its own guard uses, which is not the same one.
+        field = "advantage_absmax" if trainer is DDPOTrainer else "advantage_std"
+        assert f'"{field}"' in src, (
+            f"{trainer.__name__} does not log {field}, so whether its guard "
+            "fired cannot be recovered from a run's log"
+        )
+        assert '"has_signal": has_signal' in src, (
+            f"{trainer.__name__} does not log has_signal"
+        )
+
+    # DDPO computes has_signal outside the PPO loop and reads it in the returned
+    # metrics. Assigning it inside `for ppo_epoch in range(config.ppo_epochs)`
+    # left it undefined when that range is empty, so the metrics raised
+    # NameError on a config that previously returned normally.
+    ddpo_src = inspect.getsource(DDPOTrainer._training_step)
+    sig_at = ddpo_src.index("has_signal = (")
+    loop_at = ddpo_src.index("for ppo_epoch in range(")
+    assert sig_at < loop_at, (
+        "DDPO must compute has_signal before the PPO loop; inside it, "
+        "ppo_epochs=0 leaves it unbound and the returned metrics raise NameError"
+    )
+
+    print("  trainers log the statistic they gate on: OK")
+
+
 def test_reward_resolve():
     """Test reward registry and resolution."""
     # String resolution

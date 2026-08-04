@@ -269,4 +269,12 @@ class DDRLTrainer(BaseDiffusionTrainer):
             "mean_ratio": total_ratio / n,
             "mean_reward": trajectory.rewards.mean().item(),
             "mean_advantage": trajectory.advantages.mean().item(),
+            # The statistic `has_signal` actually gates on. Worth logging because
+            # `rl_loss` was used as a stand-in for it and is a bad one: it tracks
+            # the mean advantage, which group normalisation drives to zero
+            # whether or not there is spread, so a live epoch and a quiet one
+            # both print 0.0000. Reading quiet-epoch counts off that gave upper
+            # bounds that were written down as measurements.
+            "advantage_std": trajectory.advantages.std().item(),
+            "has_signal": has_signal,
         }

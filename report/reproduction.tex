@@ -288,20 +288,22 @@ $K{=}6$ & $0.5250$ & $0.6374$ & $3.1$\,SE \\
 
 The fix gates the anchor on the same \code{has\_signal} check that already gates \code{rl\_loss}. The same audit found DDPO had no signal guard at all --- its DPOK KL would keep pulling toward the reference with nothing opposing it --- though there the right test is advantage \emph{magnitude} rather than spread, because DDPO normalises against a per-prompt history and constant nonzero advantages are a genuine signal for it.
 
-This was first written up as model-independent, on the reasoning that any sparse reward at a small group size would reach the condition. That is wrong. SD3.5 with the identical reward, group size and recipe never reaches it:
+This was first written up as model-independent, on the reasoning that any sparse reward at a small group size would reach the condition. That is wrong. SD3.5 with the identical reward, group size and recipe reaches it far less often, across every matched run on disk:
 
 \begin{center}
 \begin{tabular}{lccc}
 \toprule
-model & reward & group & epochs with the RL term quiet \\
+model & reward & group & epochs printing \code{rl\_loss=0.0000} \\
 \midrule
-FLUX.1-dev & \code{ocr\_exact} & 6 & 12/16, 10/12 \\
-SD3.5-medium & \code{ocr\_exact} & 6 & 0/4, 0/4, 0/5, 0/5 \\
+FLUX.1-dev & \code{ocr\_exact} & 6 & at most 53 of 59 \\
+SD3.5-medium & \code{ocr\_exact} & 6 & at most 12 of 135 \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\noindent So the defect is a real code path --- applying a regulariser to a batch that cannot teach anything is wrong wherever it happens --- but reaching it needs a model whose within-group samples score identically. FLUX at group 6 does; SD3.5 does not. That points at FLUX's rollout diversity at noise $0.7$ rather than at the reward, and suggests exploration noise as the lever, untested because those runs were blocked by node contention. The tell in a log is \code{total\_loss} printing as exactly \code{data\_beta} $\times$ \code{data\_loss}.
+\noindent These are upper bounds rather than counts, and the distinction matters enough to state. Four decimals means $<0.00005$, not zero: a quiet epoch forces \code{rl\_loss} to exactly zero, so quiet implies a printed \code{0.0000}, but a live epoch with a small value prints the same. \code{rl\_loss} further tracks the \emph{mean} advantage rather than its spread --- it sits at $-\code{mean\_advantage}$ to four decimals throughout these logs --- and group normalisation centres advantages, so the mean is near zero whether or not the spread is. The quantity being thresholded is therefore not the quantity \code{has\_signal} tests. An earlier version of this table reported 12/16 and 10/12 against 0/4, 0/4, 0/5, 0/5 and concluded SD3.5 never reaches the condition; on the full set it does, in twelve epochs.
+
+\noindent So the defect is a real code path --- applying a regulariser to a batch that cannot teach anything is wrong wherever it happens --- but reaching it often appears to need a model whose within-group samples score identically. FLUX at group 6 does so far more than SD3.5. That points at FLUX's rollout diversity at noise $0.7$ rather than at the reward, and suggests exploration noise as the lever, untested because five attempts were blocked by node contention and filesystem throughput. The tell in a log is \code{total\_loss} printing as exactly \code{data\_beta} $\times$ \code{data\_loss}.
 
 \section{The anchor helps, on the rewards where it has something to do}
 

@@ -52,6 +52,30 @@ class DDPOTrainer(BaseDiffusionTrainer):
         mb_size = config.train_batch_size or batch_size
 
         num_train = max(1, int(num_steps * config.timestep_fraction))
+
+        # Skip the update when the advantages carry no signal. FlowGRPO does this
+        # by continuing past the timestep and DDRL by gating its anchor; DDPO had
+        # neither, so its DPOK KL term would keep pulling the policy toward the
+        # reference with no learning signal opposing it - the same shape of defect
+        # that let DDRL's anchor become the whole gradient and walk held-out
+        # exact-match OCR from 0.625 to 0.167. Less destructive here, since a KL
+        # to the reference pulls back toward the starting point rather than toward
+        # a different distribution, but it still applies a regulariser to a batch
+        # that cannot teach anything.
+        # Magnitude, not spread. DDPO normalises against a per-prompt reward
+        # history rather than within the batch, so it can legitimately produce
+        # constant nonzero advantages - "all of these beat this prompt's average"
+        # is a real signal and must not be skipped. A spread test would discard
+        # it. For the group-normalised trainers spread is the right test, because
+        # zero spread there implies all-zero.
+        # Computed once here rather than inside the PPO loop: it does not depend
+        # on the pass, and the metrics below read it, which would be a NameError
+        # if ppo_epochs were 0.
+        has_signal = (
+            trajectory.advantages is not None
+            and trajectory.advantages.abs().max().item() > 1e-6
+        )
+
         for ppo_epoch in range(config.ppo_epochs):
             timestep_indices = list(range(num_train))
             random.shuffle(timestep_indices)
@@ -59,26 +83,6 @@ class DDPOTrainer(BaseDiffusionTrainer):
             # Reshuffle the mini-batches each PPO pass (see FlowGRPO trainer).
             perm = torch.randperm(batch_size, device=device)
             minibatches = [perm[s:s + mb_size] for s in range(0, batch_size, mb_size)]
-
-            # Skip the update when the advantages carry no spread. FlowGRPO does
-            # this by continuing past the timestep and DDRL by gating its anchor;
-            # DDPO had neither, so its DPOK KL term would keep pulling the policy
-            # toward the reference with no learning signal opposing it - the same
-            # shape of defect that let DDRL's anchor become the whole gradient and
-            # walk held-out exact-match OCR from 0.625 to 0.167. Less destructive
-            # here, since a KL to the reference pulls back toward the starting
-            # point rather than toward a different distribution, but it still
-            # applies a regulariser to a batch that cannot teach anything.
-            # Magnitude, not spread. DDPO normalises against a per-prompt reward
-            # history rather than within the batch, so it can legitimately produce
-            # constant nonzero advantages - "all of these beat this prompt's
-            # average" is a real signal and must not be skipped. A spread test
-            # would discard it. For the group-normalised trainers spread is the
-            # right test, because zero spread there implies all-zero.
-            has_signal = (
-                trajectory.advantages is not None
-                and trajectory.advantages.abs().max().item() > 1e-6
-            )
 
             for sl in minibatches:
                 self.optimizer.zero_grad()
@@ -186,4 +190,10 @@ class DDPOTrainer(BaseDiffusionTrainer):
             "mean_ratio": total_ratio / n,
             "mean_reward": trajectory.rewards.mean().item(),
             "mean_advantage": trajectory.advantages.mean().item(),
+            # Magnitude, not spread - this mirrors DDPO's own guard, which
+            # differs from the other trainers on purpose because a buffered
+            # per-prompt baseline can legitimately produce constant nonzero
+            # advantages.
+            "advantage_absmax": trajectory.advantages.abs().max().item(),
+            "has_signal": has_signal,
         }

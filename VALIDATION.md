@@ -265,8 +265,10 @@ that `data_beta` does anything.
 
 FLUX with the identical reward and group size ran the other way: anchored
 collapsed to 0.29, unanchored held 0.625. The distinguishing variable is whether
-the RL term is live. SD3.5 never lost it (0 of 18 epochs); FLUX lost it in 22 of
-28. So:
+the RL term is live. SD3.5 lost it in at most 12 of 135 epochs; FLUX in at most
+53 of 59. Those are bounds rather than counts, and the earlier phrasing here -
+"SD3.5 never lost it (0 of 18); FLUX lost it in 22 of 28" - overstated both ends;
+see the note below on what `rl_loss` can and cannot show. So:
 
 - **RL term live** - the anchor regularises toward the data manifold and helps,
   which is what it is for.
@@ -277,6 +279,32 @@ That is exactly the behaviour the fix produces by gating the anchor on
 `has_signal`: keep it where it earns its place, drop it where it would be acting
 alone. The gate was written from the FLUX failure before this SD3.5 result
 existed, so this is confirmation rather than justification.
+
+**What `rl_loss` can and cannot show.** The quiet-epoch counts above were read
+off `rl_loss` printing as `0.0000`, and that is a weaker instrument than it
+looks. Two things limit it, in opposite directions:
+
+- Four decimals means `< 0.00005`, not zero. A quiet epoch does force `rl_loss`
+  to exactly zero, so a printed `0.0000` is *implied by* quiet - but it does not
+  *imply* quiet, since a live epoch with a small value prints the same. Every
+  FLUX count is therefore an upper bound on quiet epochs, not a measurement.
+- The direction is sound for the other end: a nonzero `rl_loss` proves the
+  advantages were not all zero, so SD3.5's live epochs are live.
+
+`rl_loss` also tracks the *mean* advantage rather than its spread - across these
+logs it sits at `-mean_advantage` to four decimals - and group normalisation
+centres advantages, so the mean is near zero whether or not the spread is. What
+survives is a covariance between ratio and advantage, which is small even when
+the signal is strong. So the quantity being thresholded is not the quantity
+`has_signal` tests.
+
+Widening from the 46 epochs originally sampled to all 194 matched-configuration
+epochs on disk, FLUX prints `0.0000` in 53 of 59 and SD3.5 in 12 of 135. The
+asymmetry is large and holds in direction, which is what the mechanism needs;
+"never" was wrong. Advantage spread itself is not logged, so the mechanism is
+inferred from a proxy rather than measured, and `report/analyze_flatgroups.py`
+records a failed attempt to recover it from the logged per-prompt means - those
+are printed to two decimals, too coarse to decide group flatness.
 
 Why counting showed nothing: it is graded, its advantages never vanish, so the
 anchor is always in the "live" regime - and there its measured effect is under

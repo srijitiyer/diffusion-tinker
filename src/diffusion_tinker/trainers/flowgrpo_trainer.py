@@ -169,4 +169,6 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
             "mean_ratio": total_ratio / n,
             "mean_reward": trajectory.rewards.mean().item(),
             "mean_advantage": trajectory.advantages.mean().item(),
+            "advantage_std": trajectory.advantages.std().item(),
+            "has_signal": has_signal,
         }
