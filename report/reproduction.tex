@@ -286,7 +286,49 @@ $K{=}6$ & $0.5250$ & $0.6374$ & $3.1$\,SE \\
 
 \noindent Identical at $K{=}4$ and diverging after, which is the shape the mechanism predicts, since the advantages only vanish once the reward has fallen far enough. All three unanchored seeds held at baseline with SD $0.006$; all three anchored seeds collapsed. With the anchor gated, FLUX stops degrading on this task --- the only configuration in this investigation that does not go down.
 
-The fix gates the anchor on the same \code{has\_signal} check that already gates \code{rl\_loss}. It is model-independent: any sparse or binary reward at a small group size will hit this, and the tell is \code{total\_loss} printing as exactly \code{data\_beta} $\times$ \code{data\_loss}.
+The fix gates the anchor on the same \code{has\_signal} check that already gates \code{rl\_loss}. The same audit found DDPO had no signal guard at all --- its DPOK KL would keep pulling toward the reference with nothing opposing it --- though there the right test is advantage \emph{magnitude} rather than spread, because DDPO normalises against a per-prompt history and constant nonzero advantages are a genuine signal for it.
+
+This was first written up as model-independent, on the reasoning that any sparse reward at a small group size would reach the condition. That is wrong. SD3.5 with the identical reward, group size and recipe never reaches it:
+
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+model & reward & group & epochs with the RL term quiet \\
+\midrule
+FLUX.1-dev & \code{ocr\_exact} & 6 & 12/16, 10/12 \\
+SD3.5-medium & \code{ocr\_exact} & 6 & 0/4, 0/4, 0/5, 0/5 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent So the defect is a real code path --- applying a regulariser to a batch that cannot teach anything is wrong wherever it happens --- but reaching it needs a model whose within-group samples score identically. FLUX at group 6 does; SD3.5 does not. That points at FLUX's rollout diversity at noise $0.7$ rather than at the reward, and suggests exploration noise as the lever, untested because those runs were blocked by node contention. The tell in a log is \code{total\_loss} printing as exactly \code{data\_beta} $\times$ \code{data\_loss}.
+
+\section{The anchor helps, on the rewards where it has something to do}
+
+The beta sweep found no effect of \code{data\_beta} on counting, at two horizons and up to eight seeds per arm. That turns out to be a statement about the reward rather than about the anchor.
+
+On a sparse reward the anchor is worth about $+0.10$. SD3.5 with \code{ocr\_exact}, untrained $0.375$, group 6, five seeds per arm:
+
+\begin{center}
+\begin{tabular}{lccccc}
+\toprule
+window & \code{data\_beta}$=0.05$ & \code{data\_beta}$=0$ & difference & & rank \\
+\midrule
+$K{=}5$ & $0.4667$ & $0.3834$ & $+0.083$ & $2.8$\,SE & 23/25 \\
+$K{=}7$ & $0.4653$ & $0.3737$ & $+0.092$ & $2.6$\,SE & 23/25 \\
+$K{=}9$ & $0.4750$ & $0.3730$ & $+0.102$ & $2.9$\,SE & 23/25 \\
+$K{=}12$ & $0.4795$ & $0.3826$ & $+0.097$ & $3.0$\,SE & 23/25 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent The effect size stays between $+0.083$ and $+0.102$, the standard error between $2.6$ and $3.0$, and the per-seed rank separation is identical at every cut. Per-seed at $K{=}12$: anchored $0.428$, $0.443$, $0.500$, $0.504$, $0.523$ against unanchored $0.299$, $0.371$, $0.383$, $0.398$, $0.462$. The worst anchored seed sits above four of five unanchored and well above the worst, so the anchor lifts the average and also protects the downside.
+
+The rank statistic is reported alongside the standard error deliberately. Two results in this report held a stable SE and did not survive --- the drift finding swung between windows, and the FLUX learning-rate finding held its SE while being confounded --- so a separation that does not depend on the SE estimate is worth stating separately.
+
+What this does not say: the anchor is not necessary. One unanchored seed reaches $0.583$ late in its run and another beats the weakest anchored seed. Removing it shifts the average down and widens the downside rather than preventing improvement.
+
+This reconciles with the counting null instead of contradicting it. Counting is graded, so within-group advantages never vanish, the policy-gradient term always contributes, and there the anchor's measured effect really is under $0.02$. The sweep picked the reward where the anchor has least to do.
 
 \section{FLUX has headroom on one task and still does not climb}
 
