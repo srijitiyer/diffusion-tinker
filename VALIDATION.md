@@ -220,7 +220,9 @@ SD3.5 with `ocr_exact` (untrained 0.375, group 6, two seeds per arm):
 | anchor 0 | 0.3491 | 0.292, 0.417 |
 
 A difference of +0.109 at 2.6 SE, with the anchor **helping** - and one unanchored
-seed degrading to 0.125 at its worst. Two seeds per arm makes that SE soft, but
+seed degrading to 0.125 at its worst. Stable as the curves extend: at K=6 the gap
+is +0.117 (0.458 against 0.342), and `sa43` reaches 0.583 against its 0.375
+baseline, which is the first genuine climb anything has produced on this task. Two seeds per arm makes that SE soft, but
 the direction is consistent and it is the first positive evidence in this project
 that `data_beta` does anything.
 
