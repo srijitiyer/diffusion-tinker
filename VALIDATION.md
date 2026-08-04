@@ -679,9 +679,23 @@ What is actually unresolved:
   climbs where counting degrades, the detector is implicated; if every reward
   degrades, it is the model or the sampler.
 
-  Two seeds' caveat: this is three seeds at two learning rates plus the untrained
-  point, five epochs each. A dose-response on two doses is suggestive, not
-  established, and a third rate would test it properly.
+  **This is the only comparison in the project that survives a window sweep.**
+
+  | window K | lr 3e-5 | lr 2e-4 | difference | |
+  |---|---|---|---|---|
+  | 5 | 0.4935 | 0.4473 | +0.0462 | 2.6 SE |
+  | 6 | 0.4940 | 0.4406 | +0.0534 | 3.2 SE |
+  | 7 | 0.4944 | 0.4397 | +0.0547 | 3.3 SE |
+
+  Same sign, same magnitude, above 2 SE at every cut, and growing slightly as
+  precision improves rather than swinging. Every other 2-SE-plus result here
+  failed exactly this check - the drift finding went from 4.2 SE to 0.4 SE
+  between adjacent windows and was withdrawn.
+
+  Caveat kept: three seeds at two rates plus the untrained point, and a
+  dose-response on two doses is weaker than on three. A third rate (say 1e-5)
+  would test whether the relationship is monotonic across the range or whether
+  3e-5 is already past a turning point.
 
   **The data anchor is not the explanation either.** Every FLUX run on this task
   had `data_beta=0.05`; the anchor had never been varied on FLUX, only on SD3.5.
