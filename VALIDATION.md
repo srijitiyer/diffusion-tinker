@@ -872,6 +872,23 @@ What is actually unresolved:
   not the venv, so torch's 1.6GB and nvidia's 2.7GB demand-page off the same
   filesystem. Five hours, zero training epochs, stopped.
 
+  That fourth failure was actionable rather than another instance of the same
+  wall, so the sbatch now prewarms the venv's shared objects alongside the model
+  blobs. Prewarming the venv had been tried and deliberately removed earlier, on
+  the grounds that 15+ minutes of streaming was not worth saving an import that
+  demand-pages only what it needs - which held while imports finished in minutes.
+  The fourth attempt is the counter-example: streaming 4.3GB sequentially is
+  bounded work, whereas demand-paging it under contention is not, and it cost an
+  hour with no upper limit in sight. The prewarm skips itself when the files are
+  already resident, so a warm node pays almost nothing.
+
+  A fifth attempt is queued behind other users rather than running: `fv42` sits
+  in PENDING (Resources) with atlas29 at 7 of 7 a6000-Adas. The exploration-noise
+  hypothesis is still untested. What has changed is that the blocker is now
+  contention for a card rather than a defect in how the job starts, and the four
+  recorded failures should not be read as four independent tests of the
+  hypothesis - none of them reached a training epoch.
+
   A third attempt, raising exploration noise to 1.0 at group 6 - the one lever
   that costs neither memory nor time and directly controls within-group sample
   diversity - could not be evaluated either, for a reason unrelated to the
