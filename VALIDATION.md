@@ -787,6 +787,17 @@ What is actually unresolved:
   already below by this stage. Suggestive only; two to four points per seed is not
   a result and is not recorded as one.
 
+  A third attempt, raising exploration noise to 1.0 at group 6 - the one lever
+  that costs neither memory nor time and directly controls within-group sample
+  diversity - could not be evaluated either, for a reason unrelated to the
+  configuration. It ran 342 transformer forward calls in two hours where the
+  identical group-6 setup had needed 3,320 to reach its first eval, roughly a 10x
+  slowdown, with no NaNs and the node reporting MIXED+PLANNED rather than
+  draining. atlas29 was simply full: 7 of 7 a6000-Adas across three users. At that
+  rate epoch 0 alone would have taken 19 hours, so the runs were stopped. Whether
+  noise level fixes the within-group variance problem on FLUX is therefore still
+  untested.
+
   The constraint is worth stating for anyone planning FLUX RL on a 48GB card:
   group 6 fits comfortably but produces frequent uniform groups on these rewards,
   group 12 fits but makes epochs slow enough that an unstable node cannot finish
