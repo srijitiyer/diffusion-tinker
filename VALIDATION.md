@@ -235,10 +235,22 @@ unanchored, a rank separation of 24 of 25 pairs, which does not rest on the SE
 estimate at all. The falling SE at larger K reflects fewer runs qualifying, not a
 weakening effect; the difference itself grows.
 
-Holding as the curves extend: at K=7 with all five seeds per arm the difference is
-+0.0916 (0.4653 against 0.3737) at 2.6 SE, with anchored winning 23 of 25 pairs.
-The effect size is stable across K=4, 5 and 7 (+0.089, +0.096, +0.092); the SE
-moves because within-arm spread does, not because the effect does.
+Holding as the curves extend, and stable in all three respects at nine points per
+seed with five seeds per arm:
+
+| window | anchored | unanchored | difference | | rank |
+|---|---|---|---|---|---|
+| K=5 | 0.4667 | 0.3834 | +0.083 | 2.8 SE | 23/25 |
+| K=7 | 0.4653 | 0.3737 | +0.092 | 2.6 SE | 23/25 |
+| K=9 | 0.4750 | 0.3730 | +0.102 | 2.9 SE | 23/25 |
+
+The effect size grows slightly with the window rather than swinging, the SE sits
+at 2.6-2.9 throughout, and the rank separation is identical at all three cuts.
+That combination is what none of this project's withdrawn findings had: the drift
+result moved 4.2 SE to 0.4 SE between adjacent windows, and the FLUX
+learning-rate result held its SE while being confounded. Per-seed at K=9,
+anchored 0.427, 0.427, 0.500, 0.500, 0.521 against unanchored 0.271, 0.375,
+0.380, 0.391, 0.448.
 
 **What this does not say.** The anchor is not necessary for the task to work.
 `sb44`, unanchored, reaches 0.500 and 0.583 late in its run, and one anchored
