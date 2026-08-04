@@ -256,6 +256,38 @@ So the result is a bound, not an effect: \emph{if} the anchor changes late-train
 
 Two things worth carrying forward. Turning the anchor on costs about $24\%$ of training throughput ($1.62$ against $2.12$ epochs per GPU-hour over $81$ GPU-hours), which is an ordinary consequence of an extra forward and backward per timestep and is useful for planning. And a measurement whose noise floor sits at the size of the effect will manufacture two-to-four sigma results in either direction depending when it is read; three of the four readings here did exactly that. The six-epoch null in the previous section stands as the firmer result, partly because it was read once at a fixed design point and held across four re-reads.
 
+\section{The data anchor trains alone when the reward goes sparse}
+
+This is a defect rather than a measurement, and the only one found since the audit that would quietly degrade a user's run instead of misleading an analysis.
+
+Exact-match OCR on FLUX collapsed from an untrained $0.625$ to $0.29$ across three seeds. The \emph{training} reward collapsed with it, $0.75 \to 0.08$, which rules out overfitting: the policy was getting worse at the objective it optimises, on its own rollouts. One log line gives the mechanism.
+
+\begin{center}
+\code{Epoch 5 | reward=0.083 | rl\_loss=0.0000 | data\_loss=0.4452 | total\_loss=0.0223}
+\end{center}
+
+\noindent \code{total\_loss} is exactly \code{data\_beta} $\times$ \code{data\_loss}. The RL term has gone to zero and the anchor is the entire gradient. Exact-match OCR is binary, so at group size 6 all six samples in a group frequently score the same; the group-normalised advantage then has no within-group spread, \code{has\_signal} is false, \code{rl\_loss} is set to zero --- and the anchor was applied regardless. It compounds, because a worse policy makes groups more uniform, which keeps the RL term off.
+
+The pre-existing zero-signal guard does not catch this. \code{BaseDiffusionTrainer} skips an epoch when fewer than two advantages are nonzero, which is a different condition from their having no spread: a group can hold several nonzero but internally identical values.
+
+The mechanism makes a prediction --- it should bite binary rewards and spare graded ones --- and that is exactly why \code{data\_beta} had made no measurable difference on counting. Tested directly, \code{ocr\_exact} at \code{data\_beta}$=0$, three seeds, everything else matched:
+
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+window & anchor on & anchor off & \\
+\midrule
+$K{=}4$ & $0.6112$ & $0.6157$ & $0.1$\,SE \\
+$K{=}5$ & $0.5591$ & $0.6284$ & $2.0$\,SE \\
+$K{=}6$ & $0.5250$ & $0.6374$ & $3.1$\,SE \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Identical at $K{=}4$ and diverging after, which is the shape the mechanism predicts, since the advantages only vanish once the reward has fallen far enough. All three unanchored seeds held at baseline with SD $0.006$; all three anchored seeds collapsed. With the anchor gated, FLUX stops degrading on this task --- the only configuration in this investigation that does not go down.
+
+The fix gates the anchor on the same \code{has\_signal} check that already gates \code{rl\_loss}. It is model-independent: any sparse or binary reward at a small group size will hit this, and the tell is \code{total\_loss} printing as exactly \code{data\_beta} $\times$ \code{data\_loss}.
+
 \section{FLUX has headroom on one task and still does not climb}
 
 The headroom argument has carried a lot of weight in this report: FLUX's flat curves were explained by its starting near the ceiling of every reward tried --- $0.792$ on OCR, $0.667$ on counting 2--5 objects, $0.625$ on exact-match OCR. That explanation makes a prediction. On a task where FLUX has room, it should climb.
