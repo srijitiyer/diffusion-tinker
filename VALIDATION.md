@@ -219,10 +219,25 @@ SD3.5 with `ocr_exact` (untrained 0.375, group 6, two seeds per arm):
 | anchor 0.05 | 0.4582 | 0.417, 0.500 |
 | anchor 0 | 0.3491 | 0.292, 0.417 |
 
-A difference of +0.109 at 2.6 SE, with the anchor **helping** - and one unanchored
-seed degrading to 0.125 at its worst. Stable as the curves extend: at K=6 the gap
-is +0.117 (0.458 against 0.342), and `sa43` reaches 0.583 against its 0.375
-baseline, which is the first genuine climb anything has produced on this task. Two seeds per arm makes that SE soft, but
+**Extended to five seeds per arm**, because at two the SE was set by between-seed
+spread and swung 1.8-2.6 with the analysis window - the same underpowered shape
+that produced this project's withdrawn findings:
+
+| window | anchored | unanchored | difference | |
+|---|---|---|---|---|
+| K=4 | 0.4722 (n=5) | 0.3835 (n=5) | +0.0887 | 3.9 SE |
+| K=5 | 0.4791 (n=4) | 0.3834 (n=5) | +0.0957 | 3.2 SE |
+| K=6 | 0.4861 (n=3) | 0.3771 (n=4) | +0.1089 | 2.4 SE |
+
+Per-seed at K=4 - anchored 0.444, 0.445, 0.472, 0.472, 0.528 against unanchored
+0.334, 0.361, 0.389, 0.403, 0.431. The lowest anchored seed beats four of five
+unanchored, a rank separation of 24 of 25 pairs, which does not rest on the SE
+estimate at all. The falling SE at larger K reflects fewer runs qualifying, not a
+weakening effect; the difference itself grows.
+
+One unanchored seed degraded to 0.125 at its worst, and `sa43` reached 0.625
+against its 0.375 baseline - the first genuine climb anything has produced on this
+task. Two seeds per arm makes that SE soft, but
 the direction is consistent and it is the first positive evidence in this project
 that `data_beta` does anything.
 
