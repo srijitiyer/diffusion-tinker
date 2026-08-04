@@ -676,6 +676,30 @@ What is actually unresolved:
   anchor keeps pulling toward generic anchor images regardless. The worse it gets,
   the more uniform the groups become, so it compounds.
 
+  **Confirmed.** `ocr_exact` at `data_beta=0`, three seeds, everything else
+  matched:
+
+  | window K | anchor on | anchor off | difference | |
+  |---|---|---|---|---|
+  | 4 | 0.6112 | 0.6157 | +0.0044 | 0.1 SE |
+  | 5 | 0.5591 | 0.6284 | +0.0693 | 2.0 SE |
+  | 6 | 0.5250 | 0.6374 | +0.1124 | 3.1 SE |
+
+  Identical at K=4 and diverging steadily after, which is the shape the mechanism
+  predicts: the advantages only vanish once the reward has fallen far enough for
+  groups to become uniform, so the anchor cannot dominate until then. All three
+  unanchored seeds hold at the 0.625 baseline with SD 0.006; all three anchored
+  seeds collapse to 0.250-0.375.
+
+  **This is a library defect, not a FLUX quirk.** With a sparse reward and a small
+  group, `has_signal` goes false, `rl_loss` is set to zero - and the trainer keeps
+  applying `data_beta * data_loss` anyway. The zero-signal guard in
+  `base_trainer` only skips an epoch when fewer than two advantages are nonzero,
+  which does not catch the case where the advantages exist but carry no
+  within-group variance. Any sparse or binary reward at a small group size will
+  hit this, on any model. It is visible in one log line: `total_loss` equal to
+  `data_beta * data_loss` with `rl_loss` at zero.
+
   That also explains why turning the anchor off changed nothing on counting:
   counting is graded, its advantages do not vanish, and the RL term keeps working.
   `fn42`/`fn43`/`fn44` test the prediction directly - `ocr_exact` at
