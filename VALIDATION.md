@@ -235,9 +235,18 @@ unanchored, a rank separation of 24 of 25 pairs, which does not rest on the SE
 estimate at all. The falling SE at larger K reflects fewer runs qualifying, not a
 weakening effect; the difference itself grows.
 
-One unanchored seed degraded to 0.125 at its worst, and `sa43` reached 0.625
-against its 0.375 baseline - the first genuine climb anything has produced on this
-task. Two seeds per arm makes that SE soft, but
+Holding as the curves extend: at K=7 with all five seeds per arm the difference is
++0.0916 (0.4653 against 0.3737) at 2.6 SE, with anchored winning 23 of 25 pairs.
+The effect size is stable across K=4, 5 and 7 (+0.089, +0.096, +0.092); the SE
+moves because within-arm spread does, not because the effect does.
+
+**What this does not say.** The anchor is not necessary for the task to work.
+`sb44`, unanchored, reaches 0.500 and 0.583 late in its run, and one anchored
+seed (0.410) is now beaten by one unanchored seed (0.417). Removing the anchor
+shifts the average down and widens the downside - the worst unanchored seed hits
+0.125, well below anything anchored - rather than preventing improvement outright.
+`sa43` reached 0.625 against a 0.375 baseline, the largest climb on this task, but
+it is a best case and not the typical one. Two seeds per arm makes that SE soft, but
 the direction is consistent and it is the first positive evidence in this project
 that `data_beta` does anything.
 
