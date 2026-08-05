@@ -18,7 +18,7 @@ smoke tests. "Validated" = the intended objective actually moves in a real run.
 | FlowGRPO | **validated** | held-out OCR 0.300±0.064 (untrained) → 0.494 → 0.702 → 0.640 → 0.847 → 0.757 (ep2..ep10), n=44. Climbs with oscillation, no collapse through epoch 10. ratio 0.9977-0.9995 |
 | DDRL (β=0) | **validated** | held-out OCR → 0.569 at epoch 2, train reward 0.130→0.146→0.315, ratio 0.9986. Identical to FlowGRPO(β=0) by construction, see below |
 | DDPO | **validated** | held-out OCR → 0.568 at epoch 2, train reward 0.130→0.399→0.530, ratio 0.9953. Now uses its own buffered per-prompt estimator |
-| DDRL (anchor, transform off) | **validated: gradual climb, no collapse** | The canonical configuration, eleven evals each against the 0.300 baseline. beta=0.01 reaches **0.815**, beta=0.05 reaches **0.860**. Both oscillate on the way up and neither collapses through epoch 20. Anchor active throughout, ratio ~0.999. This is the gradual increase at or above FlowGRPO's level that Haotian described for a small beta |
+| DDRL (anchor, transform off) | **validated: gradual climb, no collapse** | The canonical configuration, eleven evals each against the 0.300 baseline. beta=0.01 reaches **0.815**, beta=0.05 reaches **0.860**. Both oscillate on the way up and neither collapses through epoch 20. Anchor active throughout, ratio ~0.999. What this validates is the trainer, not the beta value: these are single runs, FlowGRPO reaches 0.847 on the same task, and the counting sweep puts the gap between two *identical* data_beta=0 runs at 0.0338 - so 0.815, 0.847 and 0.860 are indistinguishable and none of them is evidence that a small beta helps. An earlier version of this row read the ordering as confirming what Haotian described for a small beta, which our own sweep contradicts |
 | DDRL (anchor + monotonic transform) | **opt-in flag, off by default** | 0.300 → 0.482 → 0.893±0.036 → 0.892 → 0.873 → 0.851 (ep2..ep10), n=44, anchor active (`data_loss` ~0.268), ratio 0.9993. Climbs then holds past epoch 10, where the old collapse appeared. Kept as evidence the re-centering fix works, not as a headline result |
 | DRaFT | **validated on a held-out set for the first time** | 5.440 → 5.718 across 13 evals. The pre-audit 5.9→9.6 was **train** reward: DRaFTTrainer does not inherit BaseDiffusionTrainer, so it never called _evaluate and only ever reported the reward it directly optimizes on the prompts it optimizes. It now has a matching held-out eval |
 | SFT | **validated, and it overfits; eval moved into the library Aug 1** | held-out flow-matching loss on 16 unseen examples at fixed noise and timesteps: 0.21184 → **minimum 0.19742** (−6.8%) → 0.20035 by the end, so it turns over and gives back 1.5%. The pre-audit note only said the training loss converges, which a denoising objective does by construction; the turnover is invisible without a held-out set and is an argument for `early_stop_patience`, which the config supports and this run did not use. That held-out loss came from a callback defined in the cluster run script, so it was real for that run and absent for anyone calling `SFTTrainer` directly; `holdout_size`/`eval_every_steps` now do it inside the trainer, and `s_sft3` is queued to confirm the built-in path reproduces it |
@@ -156,6 +156,28 @@ mean anything:
 `hb03`'s `total_loss` of 0.0835 reconciles exactly with
 `rl_loss + beta * data_loss = 0.0003 + 0.3 * 0.2775`, so the weight is applied
 rather than only reported.
+
+**The sweep itself, on a common window.** The arms ran to different lengths (6 to
+15 evals), so comparing each at its own last epoch compares different amounts of
+training. On the longest window all six share, epochs 1-5, every arm having
+started at an identical 0.541:
+
+| arm | `data_beta` | mean(ep 1..5) |
+|---|---|---|
+| `hb0` | 0 | 0.5405 |
+| `hb0rep` | 0 (replicate) | 0.5743 |
+| `hb001` | 0.01 | 0.5640 |
+| `hb005` | 0.05 | 0.5460 |
+| `hb03` | 0.3 | 0.5548 |
+| `hk001` | FlowGRPO `kl_beta=0.01` | 0.5576 |
+
+The two runs of the *same* configuration differ by 0.0338. Every arm with a
+nonzero weight falls inside a 0.0180 span, which sits entirely within that gap.
+Run-to-run noise is larger than the whole effect of moving `data_beta` across
+three orders of magnitude, and no ordering by beta survives it. This is one run
+per arm, so it is not a measurement of the effect - it is a demonstration that
+one run per arm cannot measure it, which is what the four-and-eight-seed designs
+below were built to do. They agree: no effect, bounded under ~0.03.
 
 **Both new held-out metrics validated on hardware.** DiffusionDPO reports at step
 0, before any update:
