@@ -1086,6 +1086,42 @@ What is actually unresolved:
   slightly negative; separating it from zero needs ~30 seeds per arm.
 - **atlas29's segfaults have no explanation.** Four hypotheses proposed, all
   disproved or failed replication. The working response is to resubmit.
+- **atlas29's I/O is roughly 10x slower than its sibling nodes, and this was
+  misattributed to the filesystem for months.** Every note in this file about
+  "/atlas at 4.7 MB/s" or "a degraded filesystem" was wrong about the cause. The
+  same 2 GB read of the same FLUX blob at the same offset:
+
+  | where | 2 GB read |
+  |---|---|
+  | login node | 2.18 s (983 MB/s) |
+  | atlas24 (a5000) | 18.98 s (113 MB/s) |
+  | atlas25 (a4000) | 19.05 s (113 MB/s) |
+  | atlas29 (a6000ada) | killed unfinished at 180 s (<11 MB/s) |
+
+  One variable, four nodes. The storage is fine. Measured end to end: loading
+  SD3.5 plus both scorers took under 4m51s on atlas24 while FLUX on atlas29 was
+  3h26m into the same operation and still going. FLUX only fits on atlas29's
+  48 GB card - its transformer alone is 23.8 GB in bf16, against 24 GB on an
+  a5000 with nothing left for activations - so FLUX work is pinned to the one
+  crippled node. That is the whole reason five attempts at the exploration-noise
+  question produced no data, and it is worth reporting to the cluster admins
+  rather than engineering around.
+
+- **Page cache does not survive a job exiting, so every job repays the full
+  read.** `TaskPlugin=task/cgroup` with `ConstrainRAMSpace=yes` charges the page
+  cache a job reads to that job's memory cgroup, and the cgroup is torn down with
+  the job. atlas29 reports 543 GB free of 770 GB, so this is teardown rather than
+  memory pressure. Observed directly: a job starting seconds after another had
+  read the same 31.4 GB paid the full cost again, while a job running *alongside*
+  one already reading them got them nearly free (two concurrent prewarms finished
+  within 0.2 s of each other, 53m43.065s and 53m43.239s).
+
+  The consequence is a design constraint, not a nuisance. One job per question
+  pays the load per question, which on this node is hours against minutes of
+  compute. The only amortisation available is a single long-lived process that
+  loads once and takes work from a queue while it stays alive - which is what
+  `t_probe_server.py` does, and what should have been built before the first FLUX
+  attempt rather than after the fifth.
 
 Deliberate deviations, not bugs: the log-prob is mean-reduced rather than summed
 (which is what makes `clip_range=1e-3` sane), `torch.std` is Bessel-corrected
