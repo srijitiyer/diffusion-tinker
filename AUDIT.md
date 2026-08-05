@@ -360,7 +360,21 @@ normalisation drives that mean to zero regardless.
 
 What stands is the measurement, and it is clean: both arms start at an identical
 0.694 and only the anchored one falls, across three seeds each. **The anchor at
-0.05 hurts FLUX on this task. Why is not established.**
+0.05 hurts FLUX on this task.**
+
+**The likely cause is the anchor set, which is a defect in the experiment rather
+than in the library.** `gen_anchor.py` generated the 96 anchor images from eight
+scene prompts (mountain, cat, city street, flower, sailboat, library, forest
+path, ocean waves) using **SD3.5-medium**, and `t_rewards.py:131` passes that one
+directory to every DDRL run regardless of `MODEL`. So the FLUX runs anchored FLUX
+toward another model's output distribution, and the OCR runs anchored a
+text-rendering task toward images containing no text. Either alone would explain
+the collapse; together they explain the model asymmetry too, since for SD3.5 the
+same set is in-distribution and the anchor measurably helps (+0.097, 3.0 SE).
+
+This means "the anchor hurts FLUX" is not a claim about DDRL. It is a claim about
+anchoring FLUX to SD3.5 landscape photographs. See VALIDATION.md for the
+prediction that separates them.
 
 The gate remains correct code - applying a regulariser to a batch with no
 learning signal is wrong wherever it happens, and DDPO had no such guard at all -
