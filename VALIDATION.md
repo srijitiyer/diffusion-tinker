@@ -302,6 +302,43 @@ That is exactly the behaviour the fix produces by gating the anchor on
 alone. The gate was written from the FLUX failure before this SD3.5 result
 existed, so this is confirmation rather than justification.
 
+**The quiet condition is a floor effect, not a sparsity effect.** This corrects
+how the mechanism is described everywhere above. The reasoning had been that a
+binary reward gives a group of six the chance to score identically where a graded
+one does not, so binary rewards reach the condition and graded ones do not.
+Measured directly on SD3.5 at group 6, three reps per cell, spread read from the
+production `_compute_advantages` at full precision rather than off `rl_loss`
+(`report/probe_results_sd35.jsonl`, produced by `report/t_probe_server.py`):
+
+| reward | noise | within-group std | flat groups | quiet reps |
+|---|---|---|---|---|
+| `count_hard` | 0.7 | 0.1606 | 0.167 | 0/3 |
+| `count_hard` | 1.0 | 0.1562 | 0.167 | 0/3 |
+| `ocr_exact` | 0.7 | 0.4283 | 0.083 | 0/3 |
+| `ocr_exact` | 1.0 | 0.5024 | 0.000 | 0/3 |
+
+The binary reward carries *more* within-group spread than the graded one, 0.43
+against 0.16, which is the reverse of the prediction. It is what a Bernoulli
+variable does: at a mean of 0.29 its variance is near maximal, and it collapses
+only as the mean approaches 0 or 1. So a group goes flat when the task is one the
+model almost always fails (or almost always passes), not when the reward is
+binary. `c2_ddrl_b0_ocr` fits this exactly - mean reward 0.006, six of eight
+prompts at the floor.
+
+That reframes the open FLUX question. It is not "are FLUX's rollouts undiverse at
+noise 0.7" but "is FLUX pinned near zero on this task", which is a statement about
+task difficulty rather than about sampling.
+
+Exploration noise is a real lever but a weak one, and only where there is
+something to fix: on `ocr_exact` it raises spread by about 17% and clears the
+remaining flat groups, and on `count_hard` it does nothing at all. SD3.5 never
+reaches the quiet condition at either level, which is consistent with the record
+above.
+
+Cost note, since it decided the method: four configs at roughly five minutes each
+on atlas24, against 3h26m for atlas29 merely to load the model. See the atlas29
+I/O and cgroup notes near the end of this file.
+
 **What `rl_loss` can and cannot show.** The quiet-epoch counts above were read
 off `rl_loss` printing as `0.0000`, and that is a weaker instrument than it
 looks. Two things limit it, in opposite directions:
