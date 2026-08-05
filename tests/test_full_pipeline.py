@@ -640,10 +640,13 @@ def test_anchor_off_when_no_rl_signal():
     gradient, which walks the policy toward the anchor images and away from the
     task - and it compounds, because a worse policy makes groups more uniform.
 
-    Measured on FLUX with exact-match OCR at group 6: held-out fell 0.625 to 0.29
-    with the anchor on and held at 0.625 with it off, 3.1 SE apart. The tell in
-    the logs is `total_loss` printing as exactly `data_beta * data_loss` with
-    `rl_loss` at zero.
+    This gate is defensive, not a diagnosis. It was written for a FLUX result
+    where held-out exact-match OCR fell 0.625 to 0.29 with the anchor on and held
+    at 0.625 with it off, 3.1 SE apart. That measurement stands, but the group
+    scores in those runs show `has_signal` was true in all 59 epochs of both arms,
+    so the gate would have been open throughout and does not explain the collapse
+    (report/analyze_flux_anchor.py). Keep it anyway: regularising a batch that
+    cannot teach anything is wrong on its own terms.
 
     The pre-existing zero-signal guard in BaseDiffusionTrainer does not cover
     this: it skips an epoch only when fewer than two advantages are nonzero,
@@ -675,10 +678,12 @@ def test_all_trainers_guard_their_regulariser():
 
     This is one defect shape appearing in three places. When the advantages have
     no spread there is nothing to learn from, and any regularisation term applied
-    anyway becomes the entire gradient. Measured on DDRL: held-out exact-match OCR
-    fell 0.625 to 0.167 while the training reward fell 0.75 to 0.08, because the
-    data anchor kept pulling toward the anchor images after the PPO term went
-    quiet.
+    anyway becomes the entire gradient. That is an argument about the code path
+    rather than an observed failure: the FLUX collapse this was written for turned
+    out to run with the RL term live throughout, so no run in this project has
+    been shown to reach the condition. The guards stay regardless, because the
+    alternative is a regulariser training the model on a batch that carries no
+    signal.
 
     Each trainer defends differently, which is why this checks behaviour rather
     than a shared helper. FlowGRPO skips the timestep, DDRL gates its anchor,

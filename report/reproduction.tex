@@ -268,11 +268,17 @@ Exact-match OCR on FLUX collapsed from an untrained $0.625$ to $0.29$ across thr
 \code{Epoch 5 | reward=0.083 | rl\_loss=0.0000 | data\_loss=0.4452 | total\_loss=0.0223}
 \end{center}
 
-\noindent \code{total\_loss} is exactly \code{data\_beta} $\times$ \code{data\_loss}. The RL term has gone to zero and the anchor is the entire gradient. Exact-match OCR is binary, so at group size 6 all six samples in a group frequently score the same; the group-normalised advantage then has no within-group spread, \code{has\_signal} is false, \code{rl\_loss} is set to zero --- and the anchor was applied regardless. It compounds, because a worse policy makes groups more uniform, which keeps the RL term off.
+\noindent \code{total\_loss} matches \code{data\_beta} $\times$ \code{data\_loss} to the printed precision, which reads as the RL term having gone to zero and the anchor being left as the entire gradient. That reading was written up here as the mechanism --- exact-match OCR is binary, so at group size 6 the six samples frequently score alike, the group-normalised advantage has no spread, \code{has\_signal} is false, and the anchor is applied regardless, compounding as a worse policy makes groups more uniform.
 
-The pre-existing zero-signal guard does not catch this. \code{BaseDiffusionTrainer} skips an epoch when fewer than two advantages are nonzero, which is a different condition from their having no spread: a group can hold several nonzero but internally identical values.
+\textbf{It is wrong, and it is retracted.} The logs record each group's mean reward, which settles it directly (\code{report/analyze\_flux\_anchor.py}). Across the six runs, $91\%$ of group means are interior --- $0.17$, $0.33$, $0.5$, $0.67$, $0.83$, which are groups of six splitting their scores --- and the number of epochs in which \emph{every} group was flat is zero out of fifty-nine, in both arms. \code{has\_signal} thresholds spread across the whole advantage tensor, so it is false only in such an epoch. It was true in every logged epoch. The RL term was live throughout, the anchor was never the only gradient, and the gate this work adds would have been open on all of them.
 
-The mechanism makes a prediction --- it should bite binary rewards and spare graded ones --- and that is exactly why \code{data\_beta} had made no measurable difference on counting. Tested directly, \code{ocr\_exact} at \code{data\_beta}$=0$, three seeds, everything else matched:
+The single log line was not diagnostic. \code{rl\_loss} prints \code{0.0000} in $92.3\%$ of epochs in the arm that held and $92.9\%$ in the arm that collapsed; four decimals means $<0.00005$ rather than zero; and \code{rl\_loss} tracks the \emph{mean} advantage rather than its spread, which group normalisation drives to zero either way.
+
+What survives is the measurement, and it is clean. Both arms begin at an identical $0.694$ mean training reward; \code{data\_beta}$=0$ ends at $0.694$ and \code{data\_beta}$=0.05$ ends at $0.306$, three seeds each. \textbf{The anchor at $0.05$ hurts FLUX on this task, and why is not established.}
+
+The pre-existing zero-signal guard is still worth replacing. \code{BaseDiffusionTrainer} skips an epoch when fewer than two advantages are nonzero, which is a different condition from their having no spread: a group can hold several nonzero but internally identical values. Gating on \code{has\_signal} is the right test and DDPO had no guard at all --- but it is defensive code, not the explanation for the FLUX collapse and not its fix.
+
+The retracted mechanism did make a prediction --- it should bite binary rewards and spare graded ones --- and the prediction held, which is why it was believed. It is worth being clear that a confirmed prediction is not a confirmed mechanism: the anchor does hurt on \code{ocr\_exact} and not on counting, but the reason cannot be the quiet RL term, because the term was live in every epoch of both arms. Tested directly, \code{ocr\_exact} at \code{data\_beta}$=0$, three seeds, everything else matched:
 
 \begin{center}
 \begin{tabular}{lccc}

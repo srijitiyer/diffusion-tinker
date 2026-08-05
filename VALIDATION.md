@@ -297,10 +297,26 @@ see the note below on what `rl_loss` can and cannot show. So:
 - **RL term quiet** - the anchor is the only gradient and walks the policy away
   from the task.
 
-That is exactly the behaviour the fix produces by gating the anchor on
-`has_signal`: keep it where it earns its place, drop it where it would be acting
-alone. The gate was written from the FLUX failure before this SD3.5 result
-existed, so this is confirmation rather than justification.
+**The second bullet is retracted for the FLUX runs it was built on.** The logs
+carry each group's mean reward, which decides it directly, and
+`report/analyze_flux_anchor.py` reads them: 91% of group means across those six
+runs are interior (0.17, 0.33, 0.5, 0.67, 0.83 - groups of six splitting their
+scores), and the number of epochs in which *every* group was flat is **0 of 59**,
+in both arms. `has_signal` thresholds spread over the whole advantage tensor, so
+it is false only in such an epoch. It was true throughout. The RL term was live,
+the anchor was never the only gradient, and the gate would have been open on
+every one of these epochs.
+
+So the anchor-vs-signal story above describes a condition these runs never
+entered. What actually happened is simpler and still clean: both arms start at an
+identical 0.694 mean train reward, `data_beta=0` ends at 0.694 and
+`data_beta=0.05` ends at 0.306, three seeds each. The anchor at 0.05 hurts FLUX
+on this task and the cause is now open.
+
+The gate remains correct code - regularising a batch with no learning signal is
+wrong wherever it happens, and DDPO had no guard at all - but it is defensive,
+not the explanation for this result and not the fix for it. This file previously
+said the gate was confirmed by the FLUX failure; it was not.
 
 **The quiet condition is a floor effect, not a sparsity effect.** This corrects
 how the mechanism is described everywhere above. The reasoning had been that a
@@ -834,12 +850,15 @@ What is actually unresolved:
           | total_loss=0.0223 | mean_ratio=0.9999
   ```
 
-  `total_loss` is exactly `0.05 * data_loss`. The RL term has gone to zero and
-  the anchor is the only gradient still training the model. `ocr_exact` is binary,
-  so at group size 6 all six samples in a group frequently score the same, the
-  group-normalised advantage vanishes, and `rl_loss` goes with it - while the
-  anchor keeps pulling toward generic anchor images regardless. The worse it gets,
-  the more uniform the groups become, so it compounds.
+  `total_loss` matches `0.05 * data_loss` to the printed precision. This was read
+  as the RL term having gone to zero, leaving the anchor as the only gradient,
+  with `ocr_exact` being binary so that six samples frequently score alike and the
+  group-normalised advantage vanishes. **Retracted**: the group scores in these
+  same logs show 91% of group means at interior values and zero epochs out of 59
+  in which every group was flat, so `has_signal` was true throughout. The line
+  above is also not diagnostic on its own - `rl_loss` prints `0.0000` in ~92% of
+  epochs in *both* arms, including the unanchored runs that held. See
+  `report/analyze_flux_anchor.py`.
 
   **Confirmed.** `ocr_exact` at `data_beta=0`, three seeds, everything else
   matched:
@@ -893,12 +912,15 @@ What is actually unresolved:
   of FLUX epochs" conflated *prints as zero* with *switched off*, and the
   frequency table does not support the stronger reading.
 
-  What is still solid is the OCR case, where the arithmetic distinguishes:
+  The OCR case was held up here as still solid on an arithmetic argument:
   `total_loss` 0.0223 against `data_loss` 0.4452 gives `0.05 * 0.4452 = 0.022260`,
-  which prints as 0.0223, whereas a `rl_loss` of 0.0001 would print 0.0224. There
-  the RL term really was negligible and the anchor really was the whole gradient.
-  That case also had a collapsed reward (0.083), which is the condition under
-  which uniform groups are expected.
+  printing as 0.0223, where an `rl_loss` of 0.0001 would print 0.0224 - so the RL
+  term was negligible *in that epoch*. The arithmetic is right and the conclusion
+  drawn from it was not. One epoch late in a collapsed run says nothing about the
+  run, and that epoch's reward of 0.083 is the *end state* of the decline rather
+  than its cause. Over all 59 epochs of the six runs, no epoch had every group
+  flat and 91% of group means are interior, so the anchor was not the whole
+  gradient at any point that could have started the collapse.
 
   So: the anchor defect is real and the fix stands, confirmed by a prediction
   that held on three seeds. The claim that it contaminated the *counting* runs is

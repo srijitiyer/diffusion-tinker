@@ -56,12 +56,14 @@ class DDPOTrainer(BaseDiffusionTrainer):
         # Skip the update when the advantages carry no signal. FlowGRPO does this
         # by continuing past the timestep and DDRL by gating its anchor; DDPO had
         # neither, so its DPOK KL term would keep pulling the policy toward the
-        # reference with no learning signal opposing it - the same shape of defect
-        # that let DDRL's anchor become the whole gradient and walk held-out
-        # exact-match OCR from 0.625 to 0.167. Less destructive here, since a KL
-        # to the reference pulls back toward the starting point rather than toward
-        # a different distribution, but it still applies a regulariser to a batch
-        # that cannot teach anything.
+        # reference with no learning signal opposing it. This is reasoning about
+        # the code path, not a diagnosis of an observed failure - the FLUX collapse
+        # that motivated the DDRL gate turned out to happen with the RL term live
+        # throughout, so no run here has been shown to reach this condition. It is
+        # still wrong to apply a regulariser to a batch that cannot teach anything.
+        # Less destructive than DDRL's case regardless, since a KL to the reference
+        # pulls back toward the starting point rather than toward a different
+        # distribution.
         # Magnitude, not spread. DDPO normalises against a per-prompt reward
         # history rather than within the batch, so it can legitimately produce
         # constant nonzero advantages - "all of these beat this prompt's average"

@@ -325,15 +325,47 @@ Epoch 5 | reward=0.083 | rl_loss=0.0000 | data_loss=0.4452
         | total_loss=0.0223 | mean_ratio=0.9999
 ```
 
-`total_loss` is exactly `data_beta * data_loss`. The RL term has gone to zero and
-the anchor is the entire gradient.
+`total_loss` matches `data_beta * data_loss` to the printed precision, which
+looks like the RL term having gone to zero and the anchor being left as the
+entire gradient.
 
-`ocr_exact` is binary, so at group size 6 all six samples in a group frequently
-score the same. The group-normalised advantage then has no within-group variance,
-`has_signal` is false, `rl_loss` is set to zero - and `data_beta * data_loss` was
-applied anyway. The anchor pulls toward the anchor images, which costs task
-performance, which makes groups more uniform, which keeps the RL term off. It
-compounds.
+**That reading is wrong, and the rest of this section is retracted.** It said:
+`ocr_exact` is binary, so at group 6 all six samples in a group frequently score
+the same; the group-normalised advantage then has no within-group variance,
+`has_signal` is false, `rl_loss` is set to zero, and the anchor is applied
+anyway, compounding as a worse policy makes groups more uniform. Every step of
+that is checkable against the group scores the logs already carried, and it does
+not survive the check (`report/analyze_flux_anchor.py`):
+
+| | `data_beta=0` | `data_beta=0.05` |
+|---|---|---|
+| runs | 3 | 3 |
+| mean train reward | 0.694 -> 0.694 | 0.694 -> 0.306 |
+| epochs where *every* group was flat | 0 / 26 | 0 / 33 |
+| `rl_loss` printed as `0.0000` | 92.3% | 92.9% |
+
+Across all six runs, 91% of group means are interior - 0.17, 0.33, 0.5, 0.67,
+0.83, which are groups of six splitting their scores - and the count of epochs in
+which every group was flat is **zero out of fifty-nine**. `has_signal` thresholds
+spread across the whole advantage tensor, so it is false only in such an epoch.
+It was true in every logged epoch of both arms.
+
+So the RL term was live throughout, the anchor was never the only thing training
+the model, and the gate this audit added would have been open on every one of
+these epochs. The single log line above was read as diagnostic when it is not:
+`rl_loss` prints `0.0000` in ~92% of epochs in *both* arms, including the three
+that came to no harm, and four decimals means `< 0.00005` rather than zero.
+`rl_loss` also tracks the mean advantage rather than its spread, and group
+normalisation drives that mean to zero regardless.
+
+What stands is the measurement, and it is clean: both arms start at an identical
+0.694 and only the anchored one falls, across three seeds each. **The anchor at
+0.05 hurts FLUX on this task. Why is not established.**
+
+The gate remains correct code - applying a regulariser to a batch with no
+learning signal is wrong wherever it happens, and DDPO had no such guard at all -
+but it is defensive rather than the fix for this result, and this document
+previously claimed otherwise.
 
 The existing zero-signal guard did not catch it. `BaseDiffusionTrainer` skips an
 epoch when fewer than two advantages are nonzero; that is a different condition
