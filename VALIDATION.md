@@ -276,6 +276,20 @@ seed with five seeds per arm:
 | K=9 | 0.4750 | 0.3730 | +0.102 | 2.9 SE | 23/25 |
 | K=12 | 0.4795 | 0.3826 | +0.097 | 3.0 SE | 23/25 |
 
+**Reproduction, August 2026.** The curves behind this are now committed
+(`report/anchorbenefit_csv/`) with `report/analyze_anchor_benefit.py`, since this
+was the last headline number with no runnable check behind it. It reproduces in
+direction and magnitude but not exactly: +0.092 at K=5, +0.104 at K=7, +0.092 at
+K=9 and +0.101 at K=12, with SEs of 2.7, 2.9, 2.5 and 2.4 and rank separation
+23/25 at the first three windows. The K=12 row is weaker on re-reading than the
+table below claims - under a strict longest-single-file rule only three anchored
+runs now reach twelve contiguous epochs, giving 14/15 rather than 23/25 - because
+the runs kept producing epochs after the read and the rotation-file selection
+moves with them. That is the same window-drift caveat recorded for the seeded
+design, and it is why the K=5/7/9 rows, where all five seeds per arm qualify,
+carry the result. The effect itself is unmoved: every window is positive, between
++0.09 and +0.10, at 2.5 SE or better.
+
 The effect size grows slightly with the window rather than swinging, the SE sits
 at 2.6-2.9 throughout, and the rank separation is identical at all three cuts.
 That combination is what none of this project's withdrawn findings had: the drift
