@@ -477,6 +477,22 @@ possibly more than three. The `fa` and `fn` arms had between-seed SDs around 0.0
 at K=8; if the text arm's is really 0.2 it cannot resolve a 0.1 effect at three
 seeds and that will have to be stated rather than worked around.
 
+**`ft44`'s early rise reversed, which is the outcome the caveat above was for.**
+It peaked at 0.792 by epoch 2 and is back to 0.500 by epoch 10; `ft42` runs
+0.708 down to 0.375 by epoch 14. At the window all three share, K=4, the arm
+averages 0.6146 with a between-seed SD of 0.0956, against unanchored 0.6285,
+SD3.5-anchored 0.5590 and FLUX-anchored 0.5972 - an SE of 0.055 that separates it
+from nothing. On the longer window `ft42` and `ft44` both reach, K=10, they give
+0.5041 and 0.6084 for a mean of 0.5562, against 0.5347 for the FLUX-anchored arm
+and 0.6424 unanchored at K=8.
+
+So the text anchor is not rescuing the collapse. Both extended seeds decline from
+0.625 and land near the no-text arm rather than near the unanchored one. It is
+not resolved - `ft43` has five points and the arm's SD is three times the other
+arms' - but the direction has been the same for two seeds over ten epochs, and
+the reading declared in advance was that a text arm collapsing means both content
+explanations go and the anchor simply harms FLUX on this task.
+
 One caveat that is not a way out: 1.5 SE from the SD3.5-anchored arm is not a
 demonstration of equality, and three seeds cannot show two arms are the same. The
 claim here is the negative one the design was built for - the FLUX-anchored arm
