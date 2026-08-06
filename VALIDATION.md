@@ -405,9 +405,40 @@ text. Regenerating with FLUX fixed the distribution mismatch but not that. If th
 curves hold this shape, the text-free anchor becomes the leading explanation and
 the model-mismatch half should be dropped.
 
-Nothing is concluded here. `fa43` segfaulted at three points and `fa44` at zero,
-both resubmitted; the read stays at the declared point with the seeds that reach
-it.
+**Read at the declared point: the model-mismatch explanation is wrong.** Three
+seeds, common window K=6, every seed starting from an untrained 0.625 and every
+one declining:
+
+| seed | ep 0 | last | mean(ep 1..6) |
+|---|---|---|---|
+| `fa42` | 0.625 | 0.375 (ep 11) | 0.5555 |
+| `fa43` | 0.625 | 0.500 (ep 6) | 0.5277 |
+| `fa44` | 0.625 | 0.417 (ep 7) | 0.6248 |
+
+Arm mean 0.5693, between-seed SD 0.0500, SE 0.0289. Against the two arms read at
+the same window: SD3.5-anchored 0.5250 (1.5 SE away) and unanchored 0.6374
+(2.4 SE away). The FLUX-anchored arm sits with the collapsing arm, not the
+holding one, and it is the unanchored arm it separates from.
+
+So anchoring FLUX to images FLUX itself generated still collapses it. **The
+distribution-mismatch half of the anchor-set explanation, proposed a day earlier,
+is disproved by its own test.** It was the more interesting half - it would have
+explained the SD3.5/FLUX asymmetry with one mechanism - and it does not survive.
+
+What remains is the other half, untouched by this test: the anchor images contain
+no text whoever generated them, and the task is rendering text on a sign.
+Regenerating with FLUX fixed the model mismatch and left the content identical,
+which is exactly why this experiment separates the two. The next test is an
+anchor set whose images contain text; if that also collapses, the anchor simply
+harms FLUX on this task and both content explanations go.
+
+One caveat that is not a way out: 1.5 SE from the SD3.5-anchored arm is not a
+demonstration of equality, and three seeds cannot show two arms are the same. The
+claim here is the negative one the design was built for - the FLUX-anchored arm
+does not hold at baseline, which is what the mismatch explanation required.
+
+`fa43` segfaulted at three points and `fa44` at zero before these curves; both
+were resubmitted and both recovered, which is the usual atlas29 pattern.
 
 Prediction, stated before the curves extend so the reading is not a choice: if
 the FLUX-anchored arm holds near 0.625 while `fo42/43/44` fell to 0.25-0.42 over
