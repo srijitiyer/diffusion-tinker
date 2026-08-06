@@ -366,7 +366,30 @@ It also means the headline "the anchor hurts FLUX" is **not** a statement about
 DDRL. It is a statement about anchoring FLUX to 96 SD3.5 landscape photographs.
 Reporting it as a property of the method would be wrong.
 
-Sharp prediction, not yet run: regenerate the anchor set with FLUX itself and the
+**The test is running (Aug 6).** `gen_anchor_flux.py` regenerated all 96 anchor
+images with FLUX itself, same eight prompts and same counts as `gen_anchor.py`,
+so the only thing differing between the two sets is which model drew them.
+`fa42/43/44` then rerun `fo42/43/44`'s exact configuration - FLUX, `ocr_exact`,
+group 6, steps 20, `data_beta=0.05`, noise 0.7 - with `ANCHOR` pointed at the
+FLUX set. First points, against an untrained 0.625:
+
+| seed | ep 0 | ep 1 |
+|---|---|---|
+| `fa42` | 0.625 | 0.583 |
+| `fa43` | 0.625 | 0.625 |
+
+Two epochs on two seeds is not a result and is not recorded as one; the
+SD3.5-anchored arm was still near baseline at this stage too and fell later. What
+can be said is that nothing has collapsed yet. `fa44` segfaulted at epoch 0 with
+no points, which is the usual atlas29 behaviour and not configuration-dependent.
+
+Prediction, stated before the curves extend so the reading is not a choice: if
+the FLUX-anchored arm holds near 0.625 while `fo42/43/44` fell to 0.25-0.42 over
+the same window, the collapse was the anchor set and "the anchor hurts FLUX" is
+retracted outright. If it falls the same way, the out-of-distribution explanation
+is wrong and the anchor genuinely harms FLUX on this task.
+
+Original statement of the prediction: regenerate the anchor set with FLUX itself and the
 collapse should shrink or reverse. A second arm anchoring on images that contain
 text would separate the two consequences above. Both are ordinary experiments
 that need only a working node.
