@@ -432,6 +432,29 @@ which is exactly why this experiment separates the two. The next test is an
 anchor set whose images contain text; if that also collapses, the anchor simply
 harms FLUX on this task and both content explanations go.
 
+**That test is running (`ft42/43/44`, Aug 6).** `gen_anchor_text.py` generated 96
+images with FLUX in which every picture is a sign or a written surface - a
+storefront awning, a chalkboard menu, a stencilled warehouse wall, a neon sign -
+matched to `gen_anchor_flux.py` on model, prompt count, images per prompt, steps,
+guidance and resolution. The only variable is what the images depict. The strings
+are deliberately not the OCR train or eval targets, since anchoring on the
+evaluation strings would teach the target set directly.
+
+First points against an untrained 0.625:
+
+| seed | curve |
+|---|---|
+| `ft42` | 0.625, 0.708, 0.500, 0.458 |
+| `ft43` | 0.625 |
+| `ft44` | 0.625, 0.750, 0.792 |
+
+Nothing is readable here and nothing is claimed. The seeds disagree - `ft44` is
+above baseline at three points while `ft42` is below it at four - which is what
+one to four points per seed looks like on a reward whose eval granularity is
+1/24. Both no-text anchored arms were also at or above baseline this early and
+fell later, so an early rise is not evidence. All three segfaulted and were
+resubmitted; they resume from saved state.
+
 One caveat that is not a way out: 1.5 SE from the SD3.5-anchored arm is not a
 demonstration of equality, and three seeds cannot show two arms are the same. The
 claim here is the negative one the design was built for - the FLUX-anchored arm
