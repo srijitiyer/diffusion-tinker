@@ -455,6 +455,15 @@ one to four points per seed looks like on a reward whose eval granularity is
 fell later, so an early rise is not evidence. All three segfaulted and were
 resubmitted; they resume from saved state.
 
+Extended: `ft42` reaches nine points, 0.625, 0.708, 0.500, 0.458, 0.375, 0.458,
+0.500, 0.500, 0.542, and `ft44` four, 0.625, 0.750, 0.792, 0.625. `ft42`'s mean
+over epochs 1-8 is 0.5051, against 0.5347 for the FLUX-anchored arm and 0.6424
+unanchored at the same window - so on this one seed the text anchor is not
+rescuing anything and if anything sits lower. One seed against three is not a
+comparison and this is recorded only so the direction is not a surprise later;
+`fa42` alone looked like it was holding at two points and the arm ended 7.1 SE
+down.
+
 One caveat that is not a way out: 1.5 SE from the SD3.5-anchored arm is not a
 demonstration of equality, and three seeds cannot show two arms are the same. The
 claim here is the negative one the design was built for - the FLUX-anchored arm
