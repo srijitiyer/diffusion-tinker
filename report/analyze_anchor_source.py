@@ -21,6 +21,13 @@ Regenerating with FLUX removes (1) and leaves (2) exactly as it was. So if the
 FLUX-anchored arm holds near baseline, (1) was the cause; if it collapses like
 the SD3.5-anchored arm, (1) is not the cause and (2) is what survives.
 
+A fourth arm then tests (2). `ft42/43/44` anchor on 96 FLUX-generated images in
+which every picture is a sign or a written surface, matched to the `fa` set on
+everything except what the images depict. If that arm holds near baseline, the
+anchor is fine as long as it points at task-relevant data. If it collapses too,
+both content explanations are gone and the anchor harms FLUX on this task
+whatever the images contain.
+
 Window handling: read at the longest window all nine runs reach, computed here
 rather than fixed in advance, and also at a few shorter ones. This project has
 twice produced a result that existed only at one K - a 4.2 SE giveback that
@@ -40,6 +47,7 @@ ARMS = {
     "unanchored (fn)": ["fn42", "fn43", "fn44"],
     "SD3.5-anchored (fo)": ["fo42", "fo43", "fo44"],
     "FLUX-anchored (fa)": ["fa42", "fa43", "fa44"],
+    "text-anchored (ft)": ["ft42", "ft43", "ft44"],
 }
 BASELINE = 0.625
 

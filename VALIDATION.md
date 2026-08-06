@@ -493,6 +493,42 @@ arms' - but the direction has been the same for two seeds over ten epochs, and
 the reading declared in advance was that a text arm collapsing means both content
 explanations go and the anchor simply harms FLUX on this task.
 
+**All four arms, computed identically** (`report/analyze_anchor_source.py`, now
+extended to the text arm, curves in `report/anchorsrc_csv/`). The window all
+twelve runs share is K=5, still capped by `fo43`:
+
+| arm | K=4 | K=5 |
+|---|---|---|
+| unanchored | 0.6285 | 0.6361 |
+| SD3.5-anchored | 0.5590 | 0.5250 |
+| FLUX-anchored | 0.5972 | 0.5889 |
+| text-anchored | 0.6146 | 0.6056 |
+
+Short windows flatter the text arm, because its decline arrives late - `ft44` was
+at 0.792 by epoch 2. On the longest windows each pair actually reaches:
+
+| comparison | K | means | separation | rank |
+|---|---|---|---|---|
+| text vs unanchored | 7 | 0.5813 vs 0.6349 | 1.2 SE | 3/9 |
+| text vs FLUX-anchored | 7 | 0.5813 vs 0.5516 | 0.6 SE | 6/9 |
+| text vs SD3.5-anchored | 5 | 0.6056 vs 0.5250 | 1.2 SE | 7/9 |
+
+The text arm is 0.6 SE from the no-text FLUX-anchored arm and 1.2 SE below
+unanchored. It is not distinguishable from the arm it was built to differ from,
+and it is below the arm it would have to match to rescue the anchor. Three seeds
+and an SD three times the other arms' means none of these separations is
+conclusive, and the honest summary is that anchoring on task-relevant images did
+not visibly help.
+
+**Where that leaves the FLUX anchor result.** One thing is solid and survives
+every check: anchoring FLUX at `data_beta=0.05` on `ocr_exact` costs about 0.11
+against not anchoring, 7.1 SE with complete rank separation, and it does so
+whether the anchor images come from SD3.5 or FLUX and whether or not they contain
+text. Three explanations have now been proposed and withdrawn - the quiet RL
+term, distribution mismatch, and text-free content - each on evidence gathered
+after the claim. What remains is the measurement without a mechanism, which is
+what should be reported.
+
 One caveat that is not a way out: 1.5 SE from the SD3.5-anchored arm is not a
 demonstration of equality, and three seeds cannot show two arms are the same. The
 claim here is the negative one the design was built for - the FLUX-anchored arm
