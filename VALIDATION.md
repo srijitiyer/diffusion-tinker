@@ -383,6 +383,32 @@ SD3.5-anchored arm was still near baseline at this stage too and fell later. Wha
 can be said is that nothing has collapsed yet. `fa44` segfaulted at epoch 0 with
 no points, which is the usual atlas29 behaviour and not configuration-dependent.
 
+**Extended, and it is tracking the SD3.5-anchored arm rather than the unanchored
+one.** `fa42` reached seven points: 0.625, 0.583, 0.583, 0.667, 0.500, 0.542,
+0.458. On the same windows the earlier arms were read at:
+
+| window | `fa42` FLUX-anchored (1 seed) | `fo*` SD3.5-anchored (3 seeds) | `fn*` unanchored (3 seeds) |
+|---|---|---|---|
+| K=4 | 0.5833 | 0.6112 | 0.6157 |
+| K=5 | 0.5750 | 0.5591 | 0.6284 |
+| K=6 | 0.5555 | 0.5250 | 0.6374 |
+
+One seed against three, so this is indicative and nothing more. But it declines
+on the same schedule as the SD3.5-anchored arm and separates from the unanchored
+one, which is the outcome that would make the anchor-set explanation **wrong**:
+if anchoring FLUX to FLUX's own samples still collapses it, the problem is not
+that the anchor images came from another model.
+
+The competing reading that survives is the other half of the same finding - the
+anchor images contain no text, whoever generated them, and the task is rendering
+text. Regenerating with FLUX fixed the distribution mismatch but not that. If the
+curves hold this shape, the text-free anchor becomes the leading explanation and
+the model-mismatch half should be dropped.
+
+Nothing is concluded here. `fa43` segfaulted at three points and `fa44` at zero,
+both resubmitted; the read stays at the declared point with the seeds that reach
+it.
+
 Prediction, stated before the curves extend so the reading is not a choice: if
 the FLUX-anchored arm holds near 0.625 while `fo42/43/44` fell to 0.25-0.42 over
 the same window, the collapse was the anchor set and "the anchor hurts FLUX" is
