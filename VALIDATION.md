@@ -465,6 +465,18 @@ comparison and this is recorded only so the direction is not a surprise later;
 down. At ten points `ft42` reads 0.625, 0.708, 0.500, 0.458, 0.375, 0.458, 0.500,
 0.500, 0.542, 0.500, and `ft43` finally moved off its epoch-0 point to 0.667.
 
+At twelve, three and six points the two extended seeds are pulling apart rather
+than converging: over epochs 1-5, `ft42` averages 0.4998 and `ft44` averages
+0.7084, a spread of 0.209 between two runs of the same configuration. One sits
+well below the untrained 0.625 and the other well above it. For scale, the whole
+effect this arm is meant to detect - the FLUX-anchored arm's 0.108 shortfall
+against unanchored - is half that spread.
+
+So this arm needs all three seeds at a common window before it says anything, and
+possibly more than three. The `fa` and `fn` arms had between-seed SDs around 0.03
+at K=8; if the text arm's is really 0.2 it cannot resolve a 0.1 effect at three
+seeds and that will have to be stated rather than worked around.
+
 One caveat that is not a way out: 1.5 SE from the SD3.5-anchored arm is not a
 demonstration of equality, and three seeds cannot show two arms are the same. The
 claim here is the negative one the design was built for - the FLUX-anchored arm
