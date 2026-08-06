@@ -437,6 +437,28 @@ demonstration of equality, and three seeds cannot show two arms are the same. Th
 claim here is the negative one the design was built for - the FLUX-anchored arm
 does not hold at baseline, which is what the mismatch explanation required.
 
+**Final read, all nine runs, computed identically** by
+`report/analyze_anchor_source.py` over the curves in `report/anchorsrc_csv/`:
+
+| comparison | window | means | separation | rank |
+|---|---|---|---|---|
+| FLUX-anchored vs unanchored | K=8 | 0.5347 vs 0.6424 | **7.1 SE** | 0/9 |
+| FLUX-anchored vs SD3.5-anchored | K=5 | 0.5889 vs 0.5250 | 1.3 SE | 7/9 |
+
+Anchoring FLUX to images FLUX itself generated costs 0.108 against no anchor at
+all, with complete rank separation - not one of nine seed pairs overlaps. Whether
+it is *less* harmful than the SD3.5 anchor is not resolved: 1.3 SE at three seeds
+answers nothing, and the point estimate favouring it could easily be noise.
+
+Two things about the windows, since window choice has produced artifacts here
+before. The window all nine runs share is only K=5, because `fo43` segfaulted at
+six points; read there, the FLUX-anchored arm sits 1.3 SE from *both* others and
+looks ambiguous. The K=8 row uses the longest window the six `fa`/`fn` runs both
+reach, which is a pairwise window rather than a global one. That is a selection
+choice and it is stated rather than buried - but the effect it reports is 7.1 SE
+with zero overlapping pairs, which is not the kind of result that appears and
+vanishes with a window, and the direction is identical at K=5.
+
 `fa43` segfaulted at three points and `fa44` at zero before these curves; both
 were resubmitted and both recovered, which is the usual atlas29 pattern.
 
