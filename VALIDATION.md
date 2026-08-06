@@ -462,7 +462,8 @@ unanchored at the same window - so on this one seed the text anchor is not
 rescuing anything and if anything sits lower. One seed against three is not a
 comparison and this is recorded only so the direction is not a surprise later;
 `fa42` alone looked like it was holding at two points and the arm ended 7.1 SE
-down.
+down. At ten points `ft42` reads 0.625, 0.708, 0.500, 0.458, 0.375, 0.458, 0.500,
+0.500, 0.542, 0.500, and `ft43` finally moved off its epoch-0 point to 0.667.
 
 One caveat that is not a way out: 1.5 SE from the SD3.5-anchored arm is not a
 demonstration of equality, and three seeds cannot show two arms are the same. The
