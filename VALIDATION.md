@@ -579,6 +579,22 @@ systematically flatters the anchored arms. The same trap caught the text arm,
 which looked fine at K=5 and was 1.9 SE down by K=8. No conclusion until all
 three seeds reach the window the `fn` arm caps at, K=8.
 
+All three seeds now have curves, and the picture is worse for the power than for
+the hypothesis. At K=5: `fq42` 0.6750, `fq43` 0.6250, `fq44` 0.5418 - arm mean
+0.6139, between-seed SD 0.0673, SE 0.0388. Against the same window: no anchor
+0.6361, `data_beta=0.05` 0.5889, SD3.5-anchored 0.5250, text-anchored 0.6056.
+
+The ordering holds - 0.01 sits above 0.05 and below no anchor - but at 1.4 SE
+from one end and 0.6 SE from the other it is ordered by point estimate only. The
+SD came out at 0.0673, which is the text arm's 0.065 rather than the `fa` arm's
+0.023, so the power caveat written into this pre-registration is the one that
+binds: three seeds here can order the arms and cannot separate them.
+
+`fq44` is also the seed that declines, 0.625 to 0.417 by epoch 5, while the other
+two hold near or above baseline. So the arm mean rests on two of three seeds
+rather than on a consistent effect, and the honest reading is that the harm may
+be dose-dependent without this arm being able to show it.
+
 One caveat that is not a way out: 1.5 SE from the SD3.5-anchored arm is not a
 demonstration of equality, and three seeds cannot show two arms are the same. The
 claim here is the negative one the design was built for - the FLUX-anchored arm
