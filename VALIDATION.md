@@ -509,16 +509,23 @@ at 0.792 by epoch 2. On the longest windows each pair actually reaches:
 
 | comparison | K | means | separation | rank |
 |---|---|---|---|---|
-| text vs unanchored | 7 | 0.5813 vs 0.6349 | 1.2 SE | 3/9 |
-| text vs FLUX-anchored | 7 | 0.5813 vs 0.5516 | 0.6 SE | 6/9 |
+| text vs unanchored | 8 | 0.5677 vs 0.6424 | 1.9 SE | 1/9 |
+| text vs FLUX-anchored | 11 | 0.5429 vs 0.5063 | 1.2 SE | 7/9 |
 | text vs SD3.5-anchored | 5 | 0.6056 vs 0.5250 | 1.2 SE | 7/9 |
+| *(for scale)* FLUX-anchored vs unanchored | 8 | 0.5347 vs 0.6424 | 7.1 SE | 0/9 |
 
-The text arm is 0.6 SE from the no-text FLUX-anchored arm and 1.2 SE below
-unanchored. It is not distinguishable from the arm it was built to differ from,
-and it is below the arm it would have to match to rescue the anchor. Three seeds
-and an SD three times the other arms' means none of these separations is
-conclusive, and the honest summary is that anchoring on task-relevant images did
-not visibly help.
+The text arm is 1.9 SE below unanchored with one of nine seed pairs overlapping,
+and 1.2 SE from the no-text FLUX-anchored arm - so it is below the arm it would
+have to match to rescue the anchor, and not distinguishable from the arm it was
+built to differ from. The point estimate does sit above the no-text arm at every
+window, by 0.03-0.08, which is the direction the content explanation predicts;
+at 1.2 SE that is not a finding, and it is recorded so it can be tested properly
+rather than quietly dropped.
+
+Its between-seed SD is 0.065 at K=8 against 0.023 for the FLUX-anchored arm, so
+this arm is genuinely noisier and three seeds resolve less here than elsewhere.
+The honest summary is that anchoring on task-relevant images did not visibly
+rescue the collapse, and could not have shown a small improvement if one existed.
 
 **Where that leaves the FLUX anchor result.** One thing is solid and survives
 every check: anchoring FLUX at `data_beta=0.05` on `ocr_exact` costs about 0.11
