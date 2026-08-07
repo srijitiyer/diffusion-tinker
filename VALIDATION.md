@@ -536,6 +536,35 @@ term, distribution mismatch, and text-free content - each on evidence gathered
 after the claim. What remains is the measurement without a mechanism, which is
 what should be reported.
 
+**Dose-response, pre-registered before the curves exist (`fq42/43/44`, Aug 7).**
+Every FLUX anchor run so far is at `data_beta=0.05`. If the harm scales with the
+weight, that makes it a knob to turn down; if it does not, the weight is not the
+handle and something else about the anchor term on FLUX is. This arm sets
+`data_beta` to 0.01 against the FLUX-generated anchor set, matched to
+`fa42/43/44` on everything else - same model, reward, group size, steps,
+guidance, learning rate, noise and seeds - so the weight is the only variable.
+
+| `data_beta` | anchor | arm | held-out (K=8) |
+|---|---|---|---|
+| 0 | none | `fn` | 0.6424 |
+| 0.01 | FLUX images | `fq` | pending |
+| 0.05 | FLUX images | `fa` | 0.5347 |
+
+Interpretation fixed now, so the reading is not a choice later:
+
+- `fq` lands between the two and ordered by weight -> the harm is dose-dependent
+  and a smaller `data_beta` is a usable mitigation on FLUX.
+- `fq` sits with `fa` -> the harm saturates by 0.01, the weight is not the handle,
+  and turning it down will not help.
+- `fq` sits with `fn` -> 0.01 is effectively no anchor here, which would put the
+  useful range below where these recipes normally set it.
+
+Power is the obvious limit and is stated now rather than discovered at the read.
+The `fa` arm's between-seed SD was 0.023 at K=8, so a three-seed difference has an
+SE near 0.019 against a gap of 0.108 - enough to order the three arms, not enough
+to fit a curve through them. If `fq`'s SD comes out like the text arm's 0.065
+instead, it will not even do that, and that will be said.
+
 One caveat that is not a way out: 1.5 SE from the SD3.5-anchored arm is not a
 demonstration of equality, and three seeds cannot show two arms are the same. The
 claim here is the negative one the design was built for - the FLUX-anchored arm
