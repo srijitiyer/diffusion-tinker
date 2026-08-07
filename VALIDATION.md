@@ -565,6 +565,20 @@ SE near 0.019 against a gap of 0.108 - enough to order the three arms, not enoug
 to fit a curve through them. If `fq`'s SD comes out like the text arm's 0.065
 instead, it will not even do that, and that will be said.
 
+First points, and they are early: `fq42` runs 0.625, 0.583, 0.708, 0.750, 0.667,
+0.667 and `fq43` runs 0.625, 0.667, 0.667, 0.708, 0.583, with `fq44` still at its
+baseline point. Over epochs 1-4 the two seeds average 0.6770 and 0.6562 for a
+mean of 0.6666, against 0.5972 for `data_beta=0.05` and 0.6285 for no anchor at
+the same window.
+
+That is the ordering the dose-dependent reading predicts, and it is two seeds at
+four epochs, which is not a result. The specific reason to distrust it here: the
+`fa` arm's decline arrived late - `fa42` was above baseline at two points and
+`fa44` peaked at 0.792 by epoch 2 before both fell - so a short window
+systematically flatters the anchored arms. The same trap caught the text arm,
+which looked fine at K=5 and was 1.9 SE down by K=8. No conclusion until all
+three seeds reach the window the `fn` arm caps at, K=8.
+
 One caveat that is not a way out: 1.5 SE from the SD3.5-anchored arm is not a
 demonstration of equality, and three seeds cannot show two arms are the same. The
 claim here is the negative one the design was built for - the FLUX-anchored arm
