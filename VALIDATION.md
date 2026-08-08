@@ -595,6 +595,34 @@ two hold near or above baseline. So the arm mean rests on two of three seeds
 rather than on a consistent effect, and the honest reading is that the harm may
 be dose-dependent without this arm being able to show it.
 
+**Read at K=7, all nine runs, computed identically** (`report/dose_csv/`):
+
+| `data_beta` | arm | mean | between-seed SD | per-seed |
+|---|---|---|---|---|
+| 0 | `fn` | 0.6349 | 0.0124 | 0.625, 0.631, 0.649 |
+| 0.01 | `fq` | 0.6151 | 0.0749 | 0.536, 0.625, 0.685 |
+| 0.05 | `fa` | 0.5516 | 0.0396 | 0.518, 0.542, 0.595 |
+
+`fq` vs `fn` is -0.0198 at 0.5 SE (rank 3/9); `fq` vs `fa` is +0.0635 at 1.3 SE
+(rank 7/9). The three means are monotone in the weight, which is the
+dose-dependent ordering, and neither pairwise gap is significant.
+
+The useful statement is the one about `fn` rather than about `fq`. At
+`data_beta=0.05` the anchor costs 0.108 against no anchor at 7.1 SE with zero
+overlapping pairs; at 0.01 it costs 0.020 at 0.5 SE with three of nine pairs
+overlapping. So **0.01 does not reproduce the clear harm that 0.05 does**, which
+is a weaker claim than dose-dependence and is the one the data supports. Whether
+0.01 is harmless or merely too small a dose to detect at three seeds cannot be
+separated here.
+
+`fq`'s between-seed SD is 0.0749 against 0.0124 for the unanchored arm, six times
+larger. That is itself the most reproducible thing about the anchored arms: every
+one of them (`fo` 0.040, `fa` 0.040, `ft` 0.065, `fq` 0.075) is several times
+noisier across seeds than the arm with no anchor. If that holds up it is worth
+more than the mean differences - it would say the anchor term makes FLUX runs
+unstable rather than uniformly worse, which is a different problem with a
+different fix.
+
 One caveat that is not a way out: 1.5 SE from the SD3.5-anchored arm is not a
 demonstration of equality, and three seeds cannot show two arms are the same. The
 claim here is the negative one the design was built for - the FLUX-anchored arm
