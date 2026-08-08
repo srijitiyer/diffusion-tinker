@@ -616,6 +616,15 @@ That is the strongest form the dose result takes here: **`data_beta=0.01` behave
 like no anchor and `0.05` does not**, with the 0.05 harm itself being the only
 one of the three comparisons that is unambiguous.
 
+Extended to the longest window the two anchored arms both reach, K=13, the
+separation strengthens rather than fading: `fq` 0.5876 (SD 0.0760) against `fa`
+0.4957 (SD 0.0103), a difference of +0.0919 at 2.1 SE with **all nine seed pairs
+ordered**. Complete rank separation on a comparison that was 1.3 SE at K=7 and
+1.9 SE at K=8, growing monotonically as the window extends, is the pattern this
+project has come to trust - the withdrawn findings all moved the other way. The
+unanchored arm cannot be taken past K=8, so the three-way table above stays at
+that window.
+
 The earlier K=7 read of the same runs, kept for the record since the window moved
 after more epochs arrived:
 
