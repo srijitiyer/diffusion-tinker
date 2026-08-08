@@ -595,7 +595,29 @@ two hold near or above baseline. So the arm mean rests on two of three seeds
 rather than on a consistent effect, and the honest reading is that the harm may
 be dose-dependent without this arm being able to show it.
 
-**Read at K=7, all nine runs, computed identically** (`report/dose_csv/`):
+**Read at K=8, all nine runs, computed identically** (`report/dose_csv/`). This
+is the window the unanchored arm caps at, so it is as far as the comparison goes:
+
+| `data_beta` | arm | mean | between-seed SD | per-seed |
+|---|---|---|---|---|
+| 0 | `fn` | 0.6424 | 0.0120 | 0.635, 0.635, 0.656 |
+| 0.01 | `fq` | 0.6198 | 0.0757 | 0.542, 0.625, 0.693 |
+| 0.05 | `fa` | 0.5347 | 0.0235 | 0.510, 0.536, 0.557 |
+
+| comparison | difference | separation | rank |
+|---|---|---|---|
+| 0.01 vs 0 | -0.0226 | 0.5 SE | 3/9 |
+| 0.01 vs 0.05 | +0.0851 | 1.9 SE | 8/9 |
+| 0.05 vs 0 | -0.1076 | **7.1 SE** | 0/9 |
+
+At the full window the middle dose separates from 0.05 at 1.9 SE with eight of
+nine pairs ordered, while remaining indistinguishable from no anchor at 0.5 SE.
+That is the strongest form the dose result takes here: **`data_beta=0.01` behaves
+like no anchor and `0.05` does not**, with the 0.05 harm itself being the only
+one of the three comparisons that is unambiguous.
+
+The earlier K=7 read of the same runs, kept for the record since the window moved
+after more epochs arrived:
 
 | `data_beta` | arm | mean | between-seed SD | per-seed |
 |---|---|---|---|---|
