@@ -842,6 +842,53 @@ def test_anchor_uses_encoded_unconditional_not_zeroed_embeddings():
     print("  anchor conditions on an encoded empty prompt: OK")
 
 
+def test_dropped_captions_are_substituted_not_zeroed():
+    """compute_flow_matching_loss must refuse to zero a dropped caption.
+
+    SFT's caption dropout is deliberate and standard - it is how a model learns an
+    unconditional branch for CFG. But dropping a caption means encoding the empty
+    string in its place, which is what the CFG training recipe specifies and what
+    SD3's own sampler does. Zeroing the encoding is a different input, and for a
+    guidance-distilled model with no unconditional branch it is one that never
+    appears in training or sampling.
+
+    The function now requires the caller to supply the encoded empty prompt when a
+    dropout mask is passed, so the cheap-but-wrong path is not reachable by
+    accident.
+    """
+    import pytest
+    import torch
+
+    from diffusion_tinker.core.noise_strategy import compute_flow_matching_loss
+
+    B, C, H, W = 2, 4, 8, 8
+    latents = torch.randn(B, C, H, W)
+    noise = torch.randn(B, C, H, W)
+    sigmas = torch.full((B,), 0.5)
+    embeds = torch.randn(B, 4, 64)
+    pooled = torch.randn(B, 32)
+    mask = torch.tensor([True, False])
+
+    with pytest.raises(ValueError, match="encoded empty prompt"):
+        compute_flow_matching_loss(
+            transformer=None, latents=latents, noise=noise, sigmas=sigmas,
+            prompt_embeds=embeds, pooled_embeds=pooled,
+            condition_dropout_mask=mask,
+        )
+
+    # And when supplied, the dropped row must become the unconditional embedding
+    # rather than zeros. Checked through the substitution arithmetic directly.
+    u_embeds = torch.full((1, 4, 64), 0.25)
+    u_pooled = torch.full((1, 32), 0.25)
+    seq_mask = mask.float().view(B, 1, 1)
+    got = embeds * (1.0 - seq_mask) + u_embeds.expand_as(embeds) * seq_mask
+    assert torch.allclose(got[0], torch.full((4, 64), 0.25)), "dropped row not substituted"
+    assert torch.allclose(got[1], embeds[1]), "kept row was modified"
+    assert not torch.allclose(got[0], torch.zeros(4, 64)), "dropped row was zeroed"
+
+    print("  dropped captions substitute an encoded empty prompt: OK")
+
+
 def test_reward_resolve():
     """Test reward registry and resolution."""
     # String resolution

@@ -579,6 +579,30 @@ test is to rerun `fa42/43/44` on the fixed path: if the collapse shrinks or
 reverses, this is the cause; if it does not, the fix is still correct and the
 collapse still has no mechanism.
 
+The same defect class was in SFT and is fixed there too. `condition_dropout`
+(default 0.1) is deliberate and standard - caption dropout is how a model learns
+an unconditional branch for CFG - but it was also implemented by zeroing, so 10%
+of SFT batches trained on an input the model never sees, and on FLUX that is an
+input with no counterpart at all. `compute_flow_matching_loss` now *substitutes*
+the encoded empty prompt for dropped rows and raises if the caller does not supply
+one, so the cheap-but-wrong path is unreachable rather than merely unused.
+
+**Confirming run: `fu42/43/44`, launched Aug 10 on the fixed path**, identical to
+`fa42/43/44` in every other respect - FLUX, `ocr_exact`, group 6, steps 20,
+`data_beta=0.05`, noise 0.7, the FLUX-generated anchor set, seeds 42-44. New tags
+deliberately, so the fixed-path curves can never be merged with the old ones.
+
+Reading fixed before the curves exist:
+
+- `fu` holds near the unanchored 0.6424 -> the collapse was the zeroed
+  conditioning, and the three withdrawn explanations were all looking at the
+  wrong half of the term.
+- `fu` reproduces `fa`'s 0.5347 -> the conditioning was a real defect and not this
+  one's cause; the collapse keeps its status as a measurement without a mechanism
+  and the fix stands on its own terms.
+- `fu` lands between -> unresolved at three seeds, and it will be reported that
+  way rather than rounded toward the hypothesis.
+
 **Dose-response, pre-registered before the curves exist (`fq42/43/44`, Aug 7).**
 Every FLUX anchor run so far is at `data_beta=0.05`. If the harm scales with the
 weight, that makes it a knob to turn down; if it does not, the weight is not the

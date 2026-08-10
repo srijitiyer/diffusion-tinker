@@ -101,16 +101,40 @@ def compute_flow_matching_loss(
     condition_dropout_mask: torch.Tensor | None = None,
     model_type: str = "sd3",
     guidance_scale: float = 3.5,
+    uncond_embeds: torch.Tensor | None = None,
+    uncond_pooled: torch.Tensor | None = None,
 ) -> torch.Tensor:
     sigmas_bc = _left_broadcast(sigmas, latents.shape)
 
     noisy_latents = (1.0 - sigmas_bc) * latents + sigmas_bc * noise
 
     if condition_dropout_mask is not None:
+        # Dropping a caption means replacing it with the empty string and encoding
+        # that, not multiplying its encoding by zero. The two are different inputs
+        # and only the first is one the model has seen. SD3 builds its
+        # unconditional branch exactly this way (`negative_prompt=[""]` in
+        # sd3_patch) and evaluates it on every CFG step. FLUX.1-dev is
+        # guidance-distilled and has no unconditional branch at all, so a zeroed
+        # embedding handed to it alongside a live guidance scalar is a state it
+        # has never seen in training or sampling - which is why this mattered
+        # enough to change.
+        if uncond_embeds is None or uncond_pooled is None:
+            raise ValueError(
+                "condition_dropout_mask requires uncond_embeds and uncond_pooled: "
+                "dropped captions are replaced with an encoded empty prompt, not "
+                "zeroed. Encode '' once and pass it here."
+            )
         seq_mask = _left_broadcast(condition_dropout_mask.float(), prompt_embeds.shape)
-        prompt_embeds = prompt_embeds * (1.0 - seq_mask)
+        u_seq = uncond_embeds.to(prompt_embeds.dtype)
+        if u_seq.shape[0] == 1:
+            u_seq = u_seq.expand_as(prompt_embeds)
+        prompt_embeds = prompt_embeds * (1.0 - seq_mask) + u_seq * seq_mask
+
         pool_mask = _left_broadcast(condition_dropout_mask.float(), pooled_embeds.shape)
-        pooled_embeds = pooled_embeds * (1.0 - pool_mask)
+        u_pool = uncond_pooled.to(pooled_embeds.dtype)
+        if u_pool.shape[0] == 1:
+            u_pool = u_pool.expand_as(pooled_embeds)
+        pooled_embeds = pooled_embeds * (1.0 - pool_mask) + u_pool * pool_mask
 
     if model_type == "flux":
         # FLUX takes packed (B, tokens, 64) latents plus rotary position ids, and

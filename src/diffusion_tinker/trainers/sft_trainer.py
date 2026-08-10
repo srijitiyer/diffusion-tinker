@@ -157,6 +157,19 @@ class SFTTrainer:
 
         dropout_mask = torch.rand(B, device=device) < config.condition_dropout
 
+        # Caption dropout substitutes an encoded empty prompt, not a zero tensor.
+        # Encoded once and reused: the text encoders are already resident here, and
+        # the result does not depend on the batch.
+        if getattr(self, "_uncond_embeds", None) is None:
+            with torch.no_grad():
+                u_embeds, _, u_pooled, _ = self.pipeline.encode_prompt(
+                    prompt=[""], prompt_2=None, prompt_3=None,
+                    negative_prompt=None, do_classifier_free_guidance=False,
+                    device=device,
+                )
+            self._uncond_embeds = u_embeds.detach()
+            self._uncond_pooled = u_pooled.detach()
+
         with torch.autocast(device_type=device.type, dtype=autocast_dtype):
             loss = compute_flow_matching_loss(
                 transformer=self.transformer,
@@ -166,6 +179,8 @@ class SFTTrainer:
                 prompt_embeds=prompt_embeds,
                 pooled_embeds=pooled_prompt_embeds,
                 condition_dropout_mask=dropout_mask,
+                uncond_embeds=self._uncond_embeds.to(device),
+                uncond_pooled=self._uncond_pooled.to(device),
                 model_type=self._model_type,
                 guidance_scale=config.guidance_scale,
             )
