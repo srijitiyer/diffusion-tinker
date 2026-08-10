@@ -776,6 +776,72 @@ def test_trainers_log_the_statistic_they_gate_on():
     print("  trainers log the statistic they gate on: OK")
 
 
+def test_anchor_uses_encoded_unconditional_not_zeroed_embeddings():
+    """The anchor term must condition on an encoded empty prompt, not on zeros.
+
+    The anchor images are unrelated to the RL prompts, so the data term has to be
+    evaluated without that conditioning. That was implemented by multiplying the
+    RL prompt's embeddings by zero, which is not the same thing and is not an
+    input either model was trained on.
+
+    The two models differ in how badly it lands, and in the same direction as the
+    measured results. SD3 constructs its unconditional branch by encoding the
+    empty string - `sd3_patch` passes `negative_prompt=[""]` - and evaluates it on
+    every CFG step, so a zeroed embedding is at least adjacent to something it
+    knows. FLUX.1-dev is guidance-distilled: `flux_patch` has no negative prompt
+    and no CFG anywhere, only a guidance scalar. Zeroed T5 and pooled-CLIP
+    embeddings handed to FLUX alongside a live guidance value are a conditioning
+    state it has never seen.
+
+    Measured: the anchor helps SD3.5 by 0.097 at 3.0 SE and costs FLUX 0.108 at
+    7.1 SE with no overlapping seed pairs, and the FLUX cost is unchanged whether
+    the anchor images come from SD3.5 or FLUX and whether or not they contain
+    text (report/analyze_anchor_source.py). Three explanations that appealed to
+    the anchor images were tested and withdrawn; this one appeals to the
+    conditioning instead, which is the part that never varied.
+
+    This pins the fix rather than the explanation: whatever the cause of the FLUX
+    result, feeding a model an input it was never trained on is a defect.
+    """
+    import inspect
+
+    from diffusion_tinker.trainers.ddrl_trainer import DDRLTrainer
+
+    setup = inspect.getsource(DDRLTrainer._setup_data)
+    assert 'prompt=[""]' in setup, (
+        "DDRL must cache an encoded empty prompt for the anchor term"
+    )
+    assert "_uncond_embeds" in setup and "_uncond_pooled" in setup
+
+    step = inspect.getsource(DDRLTrainer._training_step)
+    assert "self._uncond_embeds" in step, (
+        "the anchor term must use the cached unconditional embedding"
+    )
+    # The old path zeroed the RL prompt's embeddings via a full dropout mask.
+    assert "condition_dropout_mask=None" in step, (
+        "the anchor term must not zero embeddings; zeros are not 'no caption'"
+    )
+    assert "dropout_mask = torch.ones" not in step, (
+        "full-dropout zeroing is back in the anchor path"
+    )
+
+    # FLUX genuinely has no unconditional branch - this is the asymmetry the fix
+    # matters for, so it is checked rather than asserted in a comment.
+    from diffusion_tinker.models import flux_patch, sd3_patch
+
+    flux_src = inspect.getsource(flux_patch)
+    sd3_src = inspect.getsource(sd3_patch)
+    assert "negative_prompt" not in flux_src, (
+        "FLUX gained a negative-prompt path; re-check whether the anchor's "
+        "unconditional handling still needs to differ by model"
+    )
+    assert 'negative_prompt=[""]' in sd3_src, (
+        "SD3 should build its unconditional branch from an encoded empty string"
+    )
+
+    print("  anchor conditions on an encoded empty prompt: OK")
+
+
 def test_reward_resolve():
     """Test reward registry and resolution."""
     # String resolution

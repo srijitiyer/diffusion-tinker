@@ -536,6 +536,49 @@ term, distribution mismatch, and text-free content - each on evidence gathered
 after the claim. What remains is the measurement without a mechanism, which is
 what should be reported.
 
+**A code defect in the anchor's conditioning, found by looking at the term itself
+rather than at the anchor images (Aug 10).** All three withdrawn explanations
+appealed to something about the anchor *data*. The conditioning is the part that
+never varied across any of those experiments, and it is wrong:
+
+The anchor images are unrelated to the RL prompts, so the data term is evaluated
+without that conditioning - correct. It was implemented as
+`prompt_embeds * (1 - dropout_mask)` with the mask set to all ones, i.e. the
+embeddings multiplied by zero. Zeros are not what "no caption" looks like to
+either model:
+
+- `sd3_patch` builds SD3's unconditional branch by passing `negative_prompt=[""]`
+  to `encode_prompt` - a genuinely *encoded* empty string - and SD3 evaluates that
+  branch on every CFG step.
+- `flux_patch` contains no negative prompt and no CFG anywhere. FLUX.1-dev is
+  guidance-distilled and has no unconditional branch at all; it takes a guidance
+  scalar instead. Zeroed T5 and pooled-CLIP embeddings handed to FLUX *alongside a
+  live `guidance=3.5`* are a conditioning state it has never seen in training or
+  in sampling.
+
+The predicted asymmetry is the measured one, and it accounts for the three
+withdrawn explanations rather than competing with them: the anchor helps SD3.5
+(+0.097) where the zeroed input is adjacent to a branch it evaluates constantly,
+and costs FLUX (-0.108) where it is not; the cost is unchanged by which model drew
+the anchor images and by whether they contain text, because none of that touches
+the conditioning; and it scales with `data_beta`, because the weight scales how
+much of that gradient is applied.
+
+**Fixed**: `_setup_data` now encodes `""` once per run and caches it, and the
+anchor term conditions on that instead of zeroing. Costs one text-encoder pass.
+`test_anchor_uses_encoded_unconditional_not_zeroed_embeddings` pins it and also
+asserts FLUX still has no negative-prompt path, so the asymmetry is checked rather
+than assumed; verified non-vacuous by restoring the zeroing and watching it fail.
+
+**Not yet confirmed empirically.** This is a fourth explanation for the FLUX
+collapse and the previous three each predicted something that came true and were
+still wrong. What separates this one is that it is a defect in the code regardless
+of the FLUX result - feeding a model an input it was never trained on is wrong on
+its own terms - so the fix stands whether or not it explains the collapse. The
+test is to rerun `fa42/43/44` on the fixed path: if the collapse shrinks or
+reverses, this is the cause; if it does not, the fix is still correct and the
+collapse still has no mechanism.
+
 **Dose-response, pre-registered before the curves exist (`fq42/43/44`, Aug 7).**
 Every FLUX anchor run so far is at `data_beta=0.05`. If the harm scales with the
 weight, that makes it a knob to turn down; if it does not, the weight is not the

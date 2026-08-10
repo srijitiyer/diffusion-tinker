@@ -27,6 +27,8 @@ class DDRLTrainer(BaseDiffusionTrainer):
             reward_kwargs=reward_kwargs, callbacks=callbacks,
         )
         self._data_latents = None
+        self._uncond_embeds = None
+        self._uncond_pooled = None
         self._setup_data()
 
     def _setup_data(self):
@@ -94,6 +96,43 @@ class DDRLTrainer(BaseDiffusionTrainer):
 
         self._data_latents = torch.cat(all_latents, dim=0)
         print(f"  Cached {len(self._data_latents)} latents ({self._data_latents.nbytes / 1e6:.0f} MB)")
+
+        # Cache a real unconditional embedding for the anchor term.
+        #
+        # The anchor images have nothing to do with the RL prompts, so the data
+        # term must not condition on them - that part was always right. It was
+        # implemented by multiplying the embeddings by zero, which is a different
+        # thing from "no caption" and is not what either model sees. SD3 builds
+        # its unconditional branch by *encoding the empty string* and evaluates
+        # that on every CFG step; FLUX.1-dev is guidance-distilled and has no
+        # unconditional branch at all, so zeroed T5 and pooled-CLIP embeddings
+        # passed alongside a live guidance scalar are a conditioning state it has
+        # never seen in training or sampling.
+        #
+        # That asymmetry runs in the same direction as the measured one: the
+        # anchor helps SD3.5 by 0.097 and costs FLUX 0.108, and it does so
+        # regardless of which model drew the anchor images or whether they contain
+        # text, all of which this explains and none of which the anchor images
+        # themselves did. Encoding "" once here costs one text-encoder pass and
+        # gives both models the input they were trained on.
+        with torch.no_grad():
+            if self.config.offload_text_encoders:
+                self._set_text_encoders_device(self.device)
+            if self._model_type == "flux":
+                u_embeds, u_pooled, _ = self.pipeline.encode_prompt(
+                    prompt=[""], prompt_2=None, device=self.device, max_sequence_length=512
+                )
+            else:
+                u_embeds, _, u_pooled, _ = self.pipeline.encode_prompt(
+                    prompt=[""], prompt_2=None, prompt_3=None,
+                    do_classifier_free_guidance=False, device=self.device,
+                )
+            if self.config.offload_text_encoders:
+                self._set_text_encoders_device("cpu")
+        self._uncond_embeds = u_embeds.detach().cpu()
+        self._uncond_pooled = u_pooled.detach().cpu()
+        print(f"  Cached unconditional embedding {tuple(self._uncond_embeds.shape)} "
+              f"for the anchor term")
 
     @staticmethod
     def _recenter_per_group(advantages: torch.Tensor, prompts: list[str]) -> torch.Tensor:
@@ -228,13 +267,24 @@ class DDRLTrainer(BaseDiffusionTrainer):
                     t = torch.sigmoid(u)
 
                     assert self._data_latents is not None, "data_beta > 0 requires train_dataset"
+                    assert self._uncond_embeds is not None, (
+                        "anchor term needs the cached unconditional embedding; "
+                        "_setup_data did not run"
+                    )
                     data_idx = torch.randint(0, len(self._data_latents), (mb_batch_size,))
                     clean_latents = self._data_latents[data_idx].to(device, dtype=autocast_dtype)
 
                     noise = torch.randn_like(clean_latents)
-                    # full condition dropout: clean latents are from the dataset, not related
-                    # to the RL prompts, so conditioning on RL prompts is semantically wrong
-                    dropout_mask = torch.ones(mb_batch_size, device=device, dtype=torch.bool)
+                    # The anchor images are unrelated to the RL prompts, so the data
+                    # term is evaluated unconditionally. Use the cached embedding of
+                    # the empty string rather than zeroing the RL prompt's embedding:
+                    # zeros are not what "no caption" looks like to either model, and
+                    # FLUX has no unconditional branch to fall back on. See the note
+                    # in _setup_data.
+                    uncond_embeds = self._uncond_embeds.to(device, dtype=autocast_dtype)
+                    uncond_pooled = self._uncond_pooled.to(device, dtype=autocast_dtype)
+                    uncond_embeds = uncond_embeds.expand(mb_batch_size, -1, -1)
+                    uncond_pooled = uncond_pooled.expand(mb_batch_size, -1)
 
                     with torch.autocast(device_type=device.type, dtype=autocast_dtype):
                         data_loss = compute_flow_matching_loss(
@@ -242,9 +292,9 @@ class DDRLTrainer(BaseDiffusionTrainer):
                             latents=clean_latents,
                             noise=noise,
                             sigmas=t,
-                            prompt_embeds=mb.prompt_embeds,
-                            pooled_embeds=mb.pooled_embeds,
-                            condition_dropout_mask=dropout_mask,
+                            prompt_embeds=uncond_embeds,
+                            pooled_embeds=uncond_pooled,
+                            condition_dropout_mask=None,
                             model_type=self._model_type,
                             guidance_scale=config.guidance_scale,
                         )
