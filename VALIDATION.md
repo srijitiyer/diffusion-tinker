@@ -603,6 +603,46 @@ Reading fixed before the curves exist:
 - `fu` lands between -> unresolved at three seeds, and it will be reported that
   way rather than rounded toward the hypothesis.
 
+**Two things checked that did *not* find a bug**, recorded because negative
+results on a bug hunt are worth as much as positive ones:
+
+- `encode_to_latents` reads `shift_factor` and `scaling_factor` off the VAE
+  config, so the anchor images land in the right latent space for whichever model
+  is loaded. Not hardcoded to SD3.
+- The anchor term computes sane values on FLUX. `data_loss` across `fa42`'s run
+  sits at 0.390-0.414 against SD3.5's 0.249-0.288 on `sa42` - same order, finite,
+  stable, no NaN and no drift to zero. It does not *decrease* on either model,
+  which is what a regulariser holding against an RL term should look like rather
+  than evidence of breakage.
+
+**The asymmetry those checks did surface**: FLUX's `data_loss` runs about 50%
+higher than SD3.5's on the same anchor images. FLUX fits them worse, so at equal
+`data_beta` its anchor gradient is proportionally larger. That matters because of
+how the two terms combine:
+
+```
+loss = rl_loss + data_beta * data_loss
+loss.backward()
+clip_grad_norm_(params, max_grad_norm=1.0)   # scales the COMBINED gradient
+```
+
+One backward pass, one clip. If the anchor's contribution is large, clipping
+scales the whole vector down and takes the RL component with it - the anchor can
+starve the RL term without either loss value showing it. That predicts everything
+the withdrawn explanations were reaching for: model-dependence (FLUX's larger
+anchor gradient), dose-dependence (larger `data_beta`, more of the clip budget),
+and indifference to what the anchor images are (all anchor sets give a similar
+`data_loss`).
+
+It is a fifth hypothesis and the previous four each explained everything too. The
+difference is that this one is *measured* rather than inferred:
+`clip_grad_norm_` returns the pre-clip norm and nothing was logging it. DDRL now
+reports `grad_norm` per epoch. A value above `max_grad_norm` means clipping is
+active and both terms are being scaled together; a value below it means clipping
+never fires and this hypothesis is dead on arrival. `fu42/43/44` were relaunched
+with the instrumentation so the fixed-conditioning test and this measurement come
+from the same runs.
+
 **Dose-response, pre-registered before the curves exist (`fq42/43/44`, Aug 7).**
 Every FLUX anchor run so far is at `data_beta=0.05`. If the harm scales with the
 weight, that makes it a knob to turn down; if it does not, the weight is not the

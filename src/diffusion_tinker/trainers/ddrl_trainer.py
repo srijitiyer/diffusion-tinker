@@ -183,6 +183,8 @@ class DDRLTrainer(BaseDiffusionTrainer):
         total_rl_loss = 0.0
         total_data_loss = 0.0
         total_ratio = 0.0
+        total_grad_norm = 0.0
+        num_clips = 0
         num_computed_steps = 0
 
         num_train = max(1, int(num_steps * config.timestep_fraction))
@@ -309,13 +311,24 @@ class DDRLTrainer(BaseDiffusionTrainer):
                 total_ratio += ratio.mean().item()
                 num_computed_steps += 1
 
-            torch.nn.utils.clip_grad_norm_(
+            # clip_grad_norm_ returns the norm BEFORE clipping, and that number is
+            # diagnostic in a way nothing else logged here is. The two terms are
+            # summed into one loss and backpropagated together, so clipping scales
+            # the combined gradient - a large anchor gradient shrinks the RL
+            # component along with it. FLUX's data_loss runs about 50% higher than
+            # SD3.5's on the same anchor set, so at equal data_beta it consumes
+            # more of the clip budget on FLUX. Whether that is actually happening
+            # is answerable only by logging the norm, which nothing did.
+            grad_norm = torch.nn.utils.clip_grad_norm_(
                 [p for p in self.transformer.parameters() if p.requires_grad],
                 config.max_grad_norm,
             )
+            total_grad_norm += float(grad_norm)
+            num_clips += 1
             self.optimizer.step()
 
         n = max(num_computed_steps, 1)
+        c = max(num_clips, 1)
         return {
             "rl_loss": total_rl_loss / n,
             "data_loss": total_data_loss / n,
@@ -329,6 +342,9 @@ class DDRLTrainer(BaseDiffusionTrainer):
             # whether or not there is spread, so a live epoch and a quiet one
             # both print 0.0000. Reading quiet-epoch counts off that gave upper
             # bounds that were written down as measurements.
+            # Pre-clip gradient norm. Above max_grad_norm means clipping is
+            # active and both terms are being scaled down together.
+            "grad_norm": total_grad_norm / c,
             "advantage_std": trajectory.advantages.std().item(),
             "has_signal": has_signal,
         }
