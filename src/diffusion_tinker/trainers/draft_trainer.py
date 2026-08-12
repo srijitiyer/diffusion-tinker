@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import os
 import random
+import warnings
 from pathlib import Path
 
 import torch
@@ -249,7 +250,26 @@ class DRaFTTrainer:
         from diffusion_tinker.models.sd3_patch import sd3_sample_with_logprob
 
         config = self.config
-        base_prompts = config.eval_prompts or self.train_prompts[: config.num_eval_prompts]
+        if config.eval_prompts:
+            base_prompts = config.eval_prompts
+        else:
+            # Same silent fallback the base trainer had: without eval_prompts the
+            # "held-out" curve is computed on training data and rises while
+            # generalisation falls. DRaFT does not inherit BaseDiffusionTrainer, so
+            # it carries its own copy of the eval path and needed its own fix - and
+            # DRaFT is the trainer where this bites hardest, since it optimises the
+            # reward by backpropagating through it and will happily overfit the
+            # prompts it trains on.
+            if not getattr(self, "_warned_eval_overlap", False):
+                warnings.warn(
+                    "eval_prompts is not set, so evaluation is running on the "
+                    f"first {config.num_eval_prompts} TRAINING prompts. The "
+                    "resulting curve measures fit to data the model is training "
+                    "on, not generalisation. Set eval_prompts to a disjoint list.",
+                    stacklevel=2,
+                )
+                self._warned_eval_overlap = True
+            base_prompts = self.train_prompts[: config.num_eval_prompts]
         eval_prompts = [p for p in base_prompts for _ in range(config.num_eval_samples_per_prompt)]
 
         self.transformer.eval()

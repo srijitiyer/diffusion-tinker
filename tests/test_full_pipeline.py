@@ -960,17 +960,25 @@ def test_eval_without_eval_prompts_warns_about_training_overlap():
 
     from diffusion_tinker.trainers.base_trainer import BaseDiffusionTrainer
 
-    src = inspect.getsource(BaseDiffusionTrainer._evaluate)
-    assert "warnings.warn" in src, "silent fallback to training prompts"
-    assert "TRAINING prompts" in src, (
-        "the warning must say plainly that the eval set is the training set"
-    )
-    # and it must fire before the prompts are used, not after
-    warn_at = src.index("warnings.warn")
-    use_at = src.index("base_prompts = self.train_prompts")
-    assert warn_at < use_at
+    from diffusion_tinker.trainers.draft_trainer import DRaFTTrainer
 
-    print("  eval falls back to training prompts loudly: OK")
+    # Checked in both, because DRaFT does not inherit BaseDiffusionTrainer and
+    # carried its own copy of the eval path - fixing the base class alone left the
+    # bug live in the trainer where it bites hardest, since DRaFT backpropagates
+    # through the reward and will overfit the prompts it trains on.
+    for cls in (BaseDiffusionTrainer, DRaFTTrainer):
+        src = inspect.getsource(cls._evaluate)
+        assert "warnings.warn" in src, f"{cls.__name__}: silent fallback to training prompts"
+        assert "TRAINING prompts" in src, (
+            f"{cls.__name__}: the warning must say plainly that the eval set is "
+            "the training set"
+        )
+        # and it must fire before the prompts are used, not after
+        warn_at = src.index("warnings.warn")
+        use_at = src.index("base_prompts = self.train_prompts")
+        assert warn_at < use_at, f"{cls.__name__}: warns after using the prompts"
+
+    print("  eval falls back to training prompts loudly, in both trainers: OK")
 
 
 def test_reward_resolve():

@@ -1749,9 +1749,42 @@ falls by construction, so with no held-out number the only signal a user sees go
 down whatever the model is doing - which is exactly the thing that made the
 pre-audit SFT and DRaFT results meaningless. Now defaults to 16.
 
+**`noise_level` was 0.1 and is now 0.7.** 0.1 is a leftover from before the
+sigma=1 singularity was capped: at that time it was the only level that appeared
+to work, because the uncapped coefficient multiplied the latent by -0.16 at 0.1
+against -55.8 at 0.7. With the cap in place that reason is gone, and 0.7 is
+FlowGRPO's value and the one every result in this file was produced at. It also
+couples to `clip_range`: the measured importance ratio is 0.9993 at noise 0.7 and
+0.9721 at noise 0.1, so `|ratio - 1|` is 0.0007 against 0.028 - a `clip_range` of
+1e-3 is matched to the first and would bind on every step at the second. Fixing
+one without the other would have been worse than fixing neither.
+
+**`timestep_fraction` was 1.0 and is now 0.99.** The field's own comment says the
+final low-sigma steps have `std_dev_t -> 0`, where the SDE log-prob is
+ill-conditioned and the ratio unreliable, and that FlowGRPO drops them. The
+default trained on them anyway.
+
+**DRaFT had its own copy of the `eval_prompts` fallback**, at
+`draft_trainer.py:252`. It does not inherit `BaseDiffusionTrainer`, so fixing the
+base class left the bug live in the trainer where it matters most - DRaFT
+backpropagates through the reward and will overfit the prompts it trains on
+faster than anything else here. Same shadowing shape as the `clip_range`
+subclasses; the test now checks both trainers.
+
 All are pinned by tests verified non-vacuous by restoring the old behaviour. None
 would have raised an error; all would have quietly produced numbers that did not
 mean what they were labelled.
+
+**The shape of every defect found in this sweep**, which is the useful part for
+whoever maintains this: a value or path that is correct in one place and shadowed,
+defaulted, or copied somewhere else. `clip_range` fixed in the base and shadowed
+in two subclasses. `eval_prompts` fixed in the base and copied in DRaFT.
+`holdout_size` implemented and defaulted off. `noise_level` correct in every run
+script and wrong in the default. None of them is a mistake in the algorithm; all
+of them are a gap between the validated configuration and the shipped one. The
+tests added here check the property across every class that declares it rather
+than in the one place the bug was found, because single-site fixes are what
+produced half this list.
 
 Deliberate deviations, not bugs: the log-prob is mean-reduced rather than summed
 (which is what makes `clip_range=1e-3` sane), `torch.std` is Bessel-corrected

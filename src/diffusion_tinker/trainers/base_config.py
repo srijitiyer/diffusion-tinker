@@ -80,7 +80,20 @@ class BaseDiffusionConfig:
     # 1/noise_level**2 (its variance is std_dev_t**2 ~ noise_level**2), so a
     # small noise_level with kl_beta>0 silently over-weights the anchor and
     # freezes the policy at the reference - stable but the reward never moves.
-    noise_level: float = 0.1
+    # 0.7, which is FlowGRPO's value and the one every result in VALIDATION.md
+    # was produced at. The old default of 0.1 is a leftover from before the
+    # sigma=1 singularity was fixed: back then 0.1 was the only level that
+    # appeared to work, because the uncapped diffusion coefficient multiplied
+    # the latent by -0.16 at 0.1 against -55.8 at 0.7. With the cap in place
+    # that reason is gone.
+    #
+    # It also couples to clip_range. Measured on an A5000 after the fix: the
+    # importance ratio sits at 0.9993 at noise 0.7 and 0.9721 at noise 0.1, so
+    # |ratio - 1| is 0.0007 against 0.028. A clip_range of 1e-3 is matched to
+    # the first and would bind on every step at the second. Change one and
+    # check the other; `mean_ratio` in the logged metrics tells you which
+    # regime you are in.
+    noise_level: float = 0.7
     resolution: int = 512
 
     # RL
@@ -102,7 +115,7 @@ class BaseDiffusionConfig:
     # sigma ones). The last low-sigma steps have std_dev_t -> 0, where the SDE
     # log-prob is ill-conditioned and the importance ratio is unreliable;
     # FlowGRPO drops them with timestep_fraction=0.99. 1.0 = train on all steps.
-    timestep_fraction: float = 1.0
+    timestep_fraction: float = 0.99
     # Normalize advantages by the global batch std instead of per-prompt std.
     # Helps low-variance rewards (e.g. aesthetic) where a tiny per-prompt std
     # otherwise amplifies sampling noise. Matches FlowGRPO's global_std option.
