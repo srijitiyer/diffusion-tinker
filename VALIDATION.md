@@ -643,6 +643,38 @@ never fires and this hypothesis is dead on arrival. `fu42/43/44` were relaunched
 with the instrumentation so the fixed-conditioning test and this measurement come
 from the same runs.
 
+**Measured, and the hypothesis is dead.** Across the instrumented runs
+`grad_norm` reads 0.0162, 0.0092, 0.0098, 0.0082, 0.0083 against a
+`max_grad_norm` of 1.0 - sixty to a hundred and twenty times below the threshold.
+Clipping never fires, so it cannot be scaling the RL term down. This was the
+declared kill condition and it is honoured without reinterpretation.
+
+The number is worth keeping for its own sake: the whole combined gradient on
+these FLUX runs has a norm around 0.01, so `max_grad_norm=1.0` is inert here and
+the collapse happens through ordinary small updates accumulating, not through any
+clipping artefact.
+
+**And the conditioning fix does not rescue the collapse either.** `fu42` runs
+0.625, 0.583, 0.583, 0.542, 0.500 and `fu43` runs 0.625, 0.667, 0.708, 0.458,
+0.500, 0.458 - the same shape as `fa` on the unfixed path. Early, and the arm
+comparison needs all three seeds at a common window, but the direction is the
+second of the three readings declared above: the zeroed conditioning was a
+genuine defect and is not the cause of this result.
+
+**Score after five hypotheses**: quiet RL term (disproved by group scores),
+distribution mismatch (disproved by regenerating the anchor set with FLUX),
+text-free content (disproved by the sign-image anchor set), zeroed conditioning
+(fixed, and the fix does not change the outcome), gradient clipping (dead on
+measurement). Two of the five were real defects worth fixing on their own terms.
+None explains why the anchor costs FLUX 0.108 on this task.
+
+The pattern across all five is worth stating for whoever picks this up: each one
+accounted for every observation available when it was proposed, and four of them
+made a prediction that came true. That is not a useful filter here. What did work
+every time was measuring the specific quantity the claim rested on - group scores
+rather than `rl_loss`, a regenerated anchor set rather than reasoning about
+distributions, `grad_norm` rather than an argument about clipping.
+
 **Dose-response, pre-registered before the curves exist (`fq42/43/44`, Aug 7).**
 Every FLUX anchor run so far is at `data_beta=0.05`. If the harm scales with the
 weight, that makes it a knob to turn down; if it does not, the weight is not the
