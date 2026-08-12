@@ -47,6 +47,15 @@ trainer.train()
 # Reaches up to 1.00 best eval OCR accuracy on SD3.5-Medium (paper: 0.823)
 ```
 
+> **On the OCR numbers above.** They were produced with `eval_prompts` unset,
+> which evaluates on the first four *training* prompts, so they measure fit to
+> training data rather than generalisation - the trainers now warn about this at
+> runtime. They also predate two reward fixes: `ocr_exact` was substring
+> containment rather than exact match, and `ocr`'s substring shortcut zeroed
+> correctly-rendered targets when the image held any other text. Treat these as
+> historical; set `eval_prompts` to a disjoint list for a real held-out number.
+
+
 ## Supported Algorithms
 
 | Algorithm | Trainer | Paper | Status |
@@ -160,17 +169,21 @@ All trainers inherit from `BaseDiffusionConfig`. Important defaults:
 FlowGRPOConfig(
     # Sampling (tuned for SD3.5-Medium on A5000/A6000)
     num_inference_steps=28,       # denoising steps during training
-    noise_level=0.1,              # SDE noise injection (higher = more exploration, lower = readable images)
+    noise_level=0.7,              # SDE noise injection. 0.7 is FlowGRPO's value and what
+                                  # every validated run used. Lowering it shrinks the
+                                  # importance ratio's spread, so clip_range must come down
+                                  # with it, and with kl_beta>0 the KL scales as 1/noise^2
+                                  # and over-weights the regulariser.
     num_samples_per_prompt=4,     # samples per prompt for advantage estimation
     guidance_scale=7.0,           # CFG scale
 
     # RL
-    clip_range=0.2,               # PPO clip range
+    clip_range=1e-3,               # PPO clip range
 
     # Training
     learning_rate=1e-4,
     lora_rank=32,
-    num_epochs=50,
+    num_epochs=100,
     save_best=True,               # auto-save checkpoint when eval improves
     early_stop_patience=0,        # 0=disabled, N=stop after N evals without improvement
 
@@ -197,7 +210,7 @@ DDRLConfig(
 See `examples/`:
 
 - `grpo_aesthetic.py` - FlowGRPO + aesthetic reward (simplest, good first test)
-- `grpo_ocr.py` - FlowGRPO + OCR reward (validated, up to 1.00 best eval accuracy)
+- `grpo_ocr.py` - FlowGRPO + OCR reward (see the caveat above on these numbers)
 - `flowgrpo_multi_reward.py` - FlowGRPO + aesthetic + CLIP multi-reward
 - `custom_reward.py` - Custom reward function with `reward_kwargs` and training callbacks
 - `ddrl_aesthetic.py` - DDRL with data-regularized training (requires dataset)

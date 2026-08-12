@@ -379,6 +379,31 @@ class BaseDiffusionTrainer(ABC):
             f"guid={c.guidance_scale}",
             f"beta={getattr(c, 'data_beta', None)}/{getattr(c, 'kl_beta', None)}",
             f"mono={getattr(c, 'use_monotonic_transform', None)}",
+            # All of the following change what is measured and were all omitted.
+            # timestep_fraction selects which denoising steps are trained on;
+            # advantage_global_std switches the advantage denominator between
+            # per-prompt and global; use_grpo_guard and ppo_epochs change the
+            # objective and the number of optimizer passes; the DDPO buffer
+            # parameters change the baseline; beta_temp rescales advantages; and
+            # train_dataset/caption_column decide which images and captions the
+            # anchor pulls toward. Reusing a tag across any of these loaded one
+            # arm's adapter and AdamW moments into another and reported it as the
+            # new arm.
+            f"tfrac={c.timestep_fraction}", f"gstd={c.advantage_global_std}",
+            f"advclip={c.adv_clip_max}", f"alpha={c.lora_alpha}",
+            f"gnorm={c.max_grad_norm}", f"wd={c.weight_decay}",
+            f"prec={c.mixed_precision}",
+            f"guard={getattr(c, 'use_grpo_guard', None)}",
+            f"ppoep={getattr(c, 'ppo_epochs', None)}",
+            f"buf={getattr(c, 'stat_buffer_size', None)}/{getattr(c, 'stat_min_count', None)}",
+            f"btemp={getattr(c, 'beta_temp', None)}",
+            f"anchor={getattr(c, 'train_dataset', None)}",
+            f"cap={getattr(c, 'caption_column', None)}/{getattr(c, 'condition_dropout', None)}",
+            # The objective itself. Swapping the reward on the same tag was the
+            # worst case: the new reward's curve reported on top of the old
+            # reward's optimised adapter, with nothing to catch it.
+            f"reward={getattr(self.reward_fn, 'name', type(self.reward_fn).__name__)}",
+            f"nprompts={len(self.train_prompts)}",
         ]
         return "|".join(parts)
 
@@ -473,7 +498,15 @@ class BaseDiffusionTrainer(ABC):
 
         saved_fp = state.get("fingerprint")
         now_fp = self._state_fingerprint()
-        if saved_fp is not None and saved_fp != now_fp:
+        # A state file with no fingerprint previously resumed into any
+        # configuration without objection, which defeats the guard entirely for
+        # exactly the files most likely to be stale.
+        if saved_fp is None:
+            raise RuntimeError(
+                f"{path} has no fingerprint, so it cannot be matched to this "
+                "configuration. Delete it to start fresh."
+            )
+        if saved_fp != now_fp:
             print(
                 f"Refusing to resume: {path} was written by a different configuration.\n"
                 f"  saved: {saved_fp}\n  now:   {now_fp}\n"

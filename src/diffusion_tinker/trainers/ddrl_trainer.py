@@ -27,6 +27,7 @@ class DDRLTrainer(BaseDiffusionTrainer):
             reward_kwargs=reward_kwargs, callbacks=callbacks,
         )
         self._data_latents = None
+        self._data_captions = None
         self._uncond_embeds = None
         self._uncond_pooled = None
         self._setup_data()
@@ -41,7 +42,12 @@ class DDRLTrainer(BaseDiffusionTrainer):
                     "For proper DDRL, set train_dataset to a HF dataset or image folder.",
                     stacklevel=2,
                 )
-                self.config.data_beta = 0.0
+                # Mutating the caller's dataclass would silently carry
+                # data_beta=0 into any other trainer built from the same object,
+                # and the resume fingerprint would then record beta=0.0 for a run
+                # the user launched at 0.3. Copy first.
+                import dataclasses
+                self.config = dataclasses.replace(self.config, data_beta=0.0)
             return
 
         if self.config.data_beta == 0:
@@ -95,6 +101,22 @@ class DDRLTrainer(BaseDiffusionTrainer):
                 all_latents.append(latents.cpu().half())  # Store as fp16 to save memory
 
         self._data_latents = torch.cat(all_latents, dim=0)
+
+        # Captions for the anchor images, if the dataset has them. DDRL_THEORY.md
+        # step 3b conditions the data term on the anchor image's own caption and
+        # drops it with probability 0.2; without captions the term is
+        # unconditional for every sample, which is a different (weaker) bound.
+        self._data_captions = None
+        cap_col = getattr(self.config, "caption_column", None)
+        if cap_col:
+            if cap_col not in ds.column_names:
+                raise ValueError(
+                    f"caption_column={cap_col!r} not in dataset. Available: "
+                    f"{ds.column_names}. Set caption_column=None for an "
+                    "unconditional anchor."
+                )
+            self._data_captions = [ds[i][cap_col] for i in range(max_images)]
+            print(f"  Cached {len(self._data_captions)} anchor captions")
         print(f"  Cached {len(self._data_latents)} latents ({self._data_latents.nbytes / 1e6:.0f} MB)")
 
         # Cache a real unconditional embedding for the anchor term.
@@ -265,8 +287,19 @@ class DDRLTrainer(BaseDiffusionTrainer):
                 # own terms. Do not cite it as the fix for the FLUX collapse.
                 # See report/analyze_flux_anchor.py.
                 if config.data_beta > 0 and has_signal:
-                    u = torch.normal(mean=config.logit_mean, std=config.logit_std, size=(mb_batch_size,), device=device)
-                    t = torch.sigmoid(u)
+                    # timestep_sampling was declared in DDRLConfig and read
+                    # nowhere, so "uniform" silently trained logit-normal.
+                    if config.timestep_sampling == "uniform":
+                        t = torch.rand(mb_batch_size, device=device)
+                    elif config.timestep_sampling == "logit_normal":
+                        u = torch.normal(mean=config.logit_mean, std=config.logit_std,
+                                         size=(mb_batch_size,), device=device)
+                        t = torch.sigmoid(u)
+                    else:
+                        raise ValueError(
+                            "timestep_sampling must be 'logit_normal' or 'uniform', "
+                            f"got {config.timestep_sampling!r}"
+                        )
 
                     assert self._data_latents is not None, "data_beta > 0 requires train_dataset"
                     assert self._uncond_embeds is not None, (
@@ -288,15 +321,45 @@ class DDRLTrainer(BaseDiffusionTrainer):
                     uncond_embeds = uncond_embeds.expand(mb_batch_size, -1, -1)
                     uncond_pooled = uncond_pooled.expand(mb_batch_size, -1)
 
+                    # With captions available, condition on the anchor image's own
+                    # caption and drop it with config.condition_dropout, which is
+                    # DDRL_THEORY.md step 3b. Without them everything stays
+                    # unconditional, as before.
+                    anchor_embeds, anchor_pooled = uncond_embeds, uncond_pooled
+                    drop_mask = None
+                    if self._data_captions is not None:
+                        caps = [self._data_captions[int(i)] for i in data_idx]
+                        with torch.no_grad():
+                            if config.offload_text_encoders:
+                                self._set_text_encoders_device(device)
+                            if self._model_type == "flux":
+                                a_e, a_p, _ = self.pipeline.encode_prompt(
+                                    prompt=caps, prompt_2=None, device=device,
+                                    max_sequence_length=512)
+                            else:
+                                a_e, _, a_p, _ = self.pipeline.encode_prompt(
+                                    prompt=caps, prompt_2=None, prompt_3=None,
+                                    do_classifier_free_guidance=False, device=device)
+                            if config.offload_text_encoders:
+                                self._set_text_encoders_device("cpu")
+                        anchor_embeds = a_e.to(device, dtype=autocast_dtype)
+                        anchor_pooled = a_p.to(device, dtype=autocast_dtype)
+                        drop_mask = (
+                            torch.rand(mb_batch_size, device=device)
+                            < config.condition_dropout
+                        )
+
                     with torch.autocast(device_type=device.type, dtype=autocast_dtype):
                         data_loss = compute_flow_matching_loss(
                             transformer=self.transformer,
                             latents=clean_latents,
                             noise=noise,
                             sigmas=t,
-                            prompt_embeds=uncond_embeds,
-                            pooled_embeds=uncond_pooled,
-                            condition_dropout_mask=None,
+                            prompt_embeds=anchor_embeds,
+                            pooled_embeds=anchor_pooled,
+                            condition_dropout_mask=drop_mask,
+                            uncond_embeds=uncond_embeds,
+                            uncond_pooled=uncond_pooled,
                             model_type=self._model_type,
                             guidance_scale=config.guidance_scale,
                         )

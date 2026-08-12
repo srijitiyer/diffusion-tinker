@@ -36,7 +36,14 @@ class _SFTDataset(Dataset):
 
     def __getitem__(self, idx):
         row = self.dataset[idx]
-        img = row[self.image_col]
+        # HF datasets hand back raw JPEG bytes or {"bytes","path"} dicts as often
+        # as PIL images. Assuming PIL here was already found and fixed as a defect
+        # on the DPO path (preference_dataset._as_image exists for exactly this);
+        # the SFT loader never picked it up and raised
+        # AttributeError: 'bytes' object has no attribute 'mode'.
+        from diffusion_tinker.core.preference_dataset import _as_image
+
+        img = _as_image(row[self.image_col])
         if img.mode != "RGB":
             img = img.convert("RGB")
         return {"image": self.transform(img), "caption": row[self.caption_col]}
@@ -150,8 +157,18 @@ class SFTTrainer:
                 device=device,
             )
 
-        u = torch.normal(mean=config.logit_mean, std=config.logit_std, size=(B,), device=device)
-        t = torch.sigmoid(u)
+        # timestep_sampling was declared in the config and read nowhere, so
+        # setting "uniform" silently trained logit-normal. Honour it.
+        if config.timestep_sampling == "uniform":
+            t = torch.rand(B, device=device)
+        elif config.timestep_sampling == "logit_normal":
+            u = torch.normal(mean=config.logit_mean, std=config.logit_std, size=(B,), device=device)
+            t = torch.sigmoid(u)
+        else:
+            raise ValueError(
+                f"timestep_sampling must be 'logit_normal' or 'uniform', got "
+                f"{config.timestep_sampling!r}"
+            )
 
         noise = torch.randn_like(latents)
 
@@ -243,7 +260,16 @@ class SFTTrainer:
 
         value = loss.item()
         print(f"Eval (step {step}): heldout_loss={value:.5f}", flush=True)
-        self._fire_callbacks("on_evaluate", epoch=step, mean_reward=value)
+        self._fire_callbacks(
+                "on_evaluate", epoch=step,
+                # SFT's held-out number is a LOSS - lower is better - while every
+                # other producer of this callback passes a reward where higher is
+                # better, and base_trainer consumes it as `mean_reward > best`.
+                # Negate so the slot keeps one meaning across trainers; a callback
+                # doing best-checkpoint selection on it was previously picking the
+                # worst SFT checkpoint. The raw loss is still printed and logged.
+                mean_reward=-value, held_out_loss=value,
+            )
         return value
 
     def _fire_callbacks(self, method: str, **kwargs):

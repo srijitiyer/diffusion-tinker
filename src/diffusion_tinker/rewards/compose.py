@@ -8,6 +8,9 @@ from diffusion_tinker.rewards.base import BaseReward
 from diffusion_tinker.rewards.protocol import RewardContext, RewardOutput
 
 
+VALID_MODES = ("weighted_sum", "advantage_level")
+
+
 class ComposedReward(BaseReward):
     """Combines multiple reward functions with weighted aggregation."""
 
@@ -26,6 +29,15 @@ class ComposedReward(BaseReward):
             raise ValueError("ComposedReward requires at least one reward.")
         self.rewards = rewards
         self.weights = weights or [1.0 / len(rewards)] * len(rewards)
+        if mode not in VALID_MODES:
+            # A bare `else: weighted_sum` meant "advantage-level" (hyphen) or any
+            # future mode name silently produced raw-scale aggregation. With
+            # ["ocr", "pickscore"] at equal weights that is OCR contributing ~4%
+            # of the signal against PickScore's ~23, i.e. training on PickScore
+            # alone while the user believes the scales were normalised.
+            raise ValueError(
+                f"reward_mode must be one of {VALID_MODES}, got {mode!r}"
+            )
         self.mode = mode
 
         if len(self.rewards) != len(self.weights):

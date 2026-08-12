@@ -161,7 +161,7 @@ class OCRExactReward(OCRReward):
 
     The default reward normalizes edit distance by target length, which makes
     longer targets *more* forgiving: one wrong character costs 1/3 on "CAT" but
-    1/13 on "PURPLE ORCHID". That is why using harder prompts to create headroom
+    1/12 on "PURPLE ORCHID" (spaces are stripped before the division). That is why using harder prompts to create headroom
     does not work - FLUX.1-dev scores 0.792 on short words and still 0.691 on
     two-word phrases, because partial credit absorbs the extra difficulty.
 

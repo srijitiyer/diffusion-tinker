@@ -84,9 +84,28 @@ class CountReward(BaseReward):
         if n is None or obj is None:
             return 0.0
         c = self._count(image, obj)
-        # smooth: 1.0 at the exact count, falling off with the miss so GRPO gets
-        # a gradient toward the right number instead of an all-or-nothing signal
-        return float(max(0.0, 1.0 - abs(c - n) / max(n, 1)))
+        # Smooth: 1.0 at the exact count, falling off with the miss so GRPO gets a
+        # gradient toward the right number instead of an all-or-nothing signal.
+        #
+        # Divided by (n + 1), not max(n, 1). The old denominator made this exactly
+        # binary at n=1 - reachable, since "a", "an" and "one" all parse to 1 - and
+        # flat at 0 for every c >= 2n, so a near miss and a wild overcount were
+        # indistinguishable and there was no gradient between them. Both cases
+        # contradicted the rationale in the line above, which is the whole reason
+        # this deviates from GenEval's binary score. With (n + 1): n=1 gives 0.5 at
+        # c=0 and c=2 instead of 0.0, and n=3 gives 0.25 at c=6 instead of 0.0.
+        return float(max(0.0, 1.0 - abs(c - n) / (n + 1.0)))
+
+    def to(self, device):
+        # Every other model-backed reward overrides this (aesthetic, clip_score,
+        # pickscore, hps_v2). Without it BaseReward.to updates self.device only,
+        # so a CountReward whose OWLv2 is already loaded starts sending inputs to
+        # the new device while the model stays on the old one - a device-mismatch
+        # RuntimeError at scoring time.
+        super().to(device)
+        if getattr(self, "_model", None) is not None:
+            self._model = self._model.to(device)
+        return self
 
     def _compute(self, ctx: RewardContext) -> RewardOutput:
         self._ensure_loaded()

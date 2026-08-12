@@ -63,11 +63,34 @@ class PreferenceDataset(Dataset):
             ]
         )
 
+        # Drop tied pairs. Pick-a-Pic encodes "no preference" as label_0 == 0.5,
+        # and Diffusion-DPO filters those out before training. The swap test is
+        # `label < 0.5`, which a tie fails, so ties previously trained with jpg_0
+        # silently promoted to winner: a fraction of steps pushing the model to
+        # prefer an arbitrary image over an equally-rated one. That is zero-mean
+        # gradient noise fed into a loss with beta=5000, i.e. the saturating tail
+        # of logsigmoid, which is where this trainer is most sensitive.
+        self._indices = list(range(len(hf_dataset)))
+        if label_col:
+            keep = []
+            for i in range(len(hf_dataset)):
+                try:
+                    if abs(float(hf_dataset[i][label_col]) - 0.5) < 1e-6:
+                        continue
+                except (TypeError, ValueError, KeyError):
+                    pass
+                keep.append(i)
+            dropped = len(self._indices) - len(keep)
+            if dropped:
+                print(f"PreferenceDataset: dropped {dropped} tied pairs of "
+                      f"{len(self._indices)}")
+            self._indices = keep
+
     def __len__(self) -> int:
-        return len(self.dataset)
+        return len(self._indices)
 
     def __getitem__(self, idx: int) -> dict:
-        row = self.dataset[idx]
+        row = self.dataset[self._indices[idx]]
 
         winner_img = row[self.winner_col]
         loser_img = row[self.loser_col]

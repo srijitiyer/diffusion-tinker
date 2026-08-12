@@ -379,7 +379,17 @@ def _bind_trainer_helpers(stub):
     them - the same single-site-fix pattern that produced several of the defects
     this suite now pins.
     """
+    from types import SimpleNamespace
+
     from diffusion_tinker.trainers.base_trainer import BaseDiffusionTrainer
+
+    # The fingerprint covers the objective too - reward and prompt count - because
+    # swapping the reward on a reused tag silently reported the new reward's curve
+    # on top of the old reward's adapter. Stubs need both to compute it.
+    if not hasattr(stub, "reward_fn"):
+        stub.reward_fn = SimpleNamespace(name="stub_reward")
+    if not hasattr(stub, "train_prompts"):
+        stub.train_prompts = ["a cat"]
 
     stub._state_path = lambda: BaseDiffusionTrainer._state_path(stub)
     stub._state_fingerprint = lambda: BaseDiffusionTrainer._state_fingerprint(stub)
@@ -845,9 +855,17 @@ def test_anchor_uses_encoded_unconditional_not_zeroed_embeddings():
     assert "self._uncond_embeds" in step, (
         "the anchor term must use the cached unconditional embedding"
     )
-    # The old path zeroed the RL prompt's embeddings via a full dropout mask.
-    assert "condition_dropout_mask=None" in step, (
-        "the anchor term must not zero embeddings; zeros are not 'no caption'"
+    # The anchor now follows DDRL_THEORY.md step 3b: condition on the anchor
+    # image's own caption when the dataset has one, dropping it with probability
+    # condition_dropout. Either way the dropped rows must be SUBSTITUTED with the
+    # encoded empty prompt, never zeroed - so uncond_embeds has to reach the loss.
+    assert "uncond_embeds=uncond_embeds" in step, (
+        "the anchor must hand compute_flow_matching_loss a real unconditional "
+        "embedding, otherwise dropped rows fall back to zeros"
+    )
+    assert "config.condition_dropout" in step, (
+        "DDRL_THEORY.md step 3b drops the caption with probability 0.2; the "
+        "trainer must read condition_dropout"
     )
     assert "dropout_mask = torch.ones" not in step, (
         "full-dropout zeroing is back in the anchor path"
@@ -970,6 +988,55 @@ def test_sft_reports_a_held_out_number_by_default():
     )
 
     print(f"  SFT holds out {cfg.holdout_size} examples by default: OK")
+
+
+def test_no_config_field_is_dead():
+    """Every declared config field must be read somewhere in src/.
+
+    `timestep_sampling` was declared on both DDRLConfig and SFTConfig and read
+    nowhere: setting "uniform" silently trained logit-normal. A field a user can
+    set that changes nothing is the same class of defect as a default that does
+    something other than it says.
+    """
+    import dataclasses
+    import pathlib
+
+    from diffusion_tinker.trainers.base_config import BaseDiffusionConfig
+    from diffusion_tinker.trainers.ddpo_config import DDPOConfig
+    from diffusion_tinker.trainers.ddrl_config import DDRLConfig
+    from diffusion_tinker.trainers.diffusion_dpo_config import DiffusionDPOConfig
+    from diffusion_tinker.trainers.draft_config import DRaFTConfig
+    from diffusion_tinker.trainers.flowgrpo_config import FlowGRPOConfig
+    from diffusion_tinker.trainers.sft_config import SFTConfig
+
+    src = pathlib.Path(__file__).resolve().parents[1] / "src"
+    # Exclude the *_config.py files themselves: a field's own declaration would
+    # otherwise count as a use, which makes this check pass for every field and
+    # catch nothing. (It did exactly that on the first attempt.)
+    body = "\n".join(
+        p.read_text() for p in src.rglob("*.py")
+        if not p.name.endswith("_config.py")
+    )
+
+    # Fields the loop reads off `self.config` via getattr, or that are consumed
+    # by name outside src (output paths, dataset plumbing).
+    exempt = {"output_dir", "dataset_split", "seed"}
+
+    dead = []
+    for cls in (BaseDiffusionConfig, FlowGRPOConfig, DDPOConfig, DDRLConfig,
+                SFTConfig, DiffusionDPOConfig, DRaFTConfig):
+        for f in dataclasses.fields(cls):
+            if f.name in exempt:
+                continue
+            if f.name not in body:
+                dead.append(f"{cls.__name__}.{f.name}")
+
+    assert not dead, (
+        "config fields declared but never read, so setting them does nothing: "
+        + ", ".join(sorted(set(dead)))
+    )
+
+    print("  no dead config fields: OK")
 
 
 def test_eval_without_eval_prompts_warns_about_training_overlap():

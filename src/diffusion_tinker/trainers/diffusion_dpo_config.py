@@ -37,7 +37,12 @@ class DiffusionDPOConfig(BaseDiffusionConfig):
     # fraction of held-out pairs where the implicit reward prefers the winner,
     # which is 0.5 for an untrained adapter and is the metric the DPO paper
     # reports. None disables it.
-    eval_split: str | None = None
+    # Same defect class as SFTConfig.holdout_size=0, which this file's own
+    # comment already identifies: with no eval split the trainer reports only its
+    # training loss, which is the failure the audit found in DRaFT. "train[-5%:]"
+    # holds out the tail of the training split, which needs no extra download and
+    # is disjoint from what the loader consumes when eval_split is set.
+    eval_split: str | None = "train[-5%:]"
     num_eval_pairs: int = 64
     # Denoising timesteps averaged per pair. The implicit reward is a Monte-Carlo
     # estimate over (t, noise), so a single draw per pair is far too noisy to

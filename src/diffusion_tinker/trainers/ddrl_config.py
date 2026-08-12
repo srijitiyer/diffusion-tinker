@@ -37,3 +37,15 @@ class DDRLConfig(BaseDiffusionConfig):
     train_dataset: str | None = None  # HF dataset name or local image folder path
     dataset_split: str = "train"
     image_column: str = "image"
+    # DDRL_THEORY.md step 3b samples (x_0, c) from data and drops c with
+    # probability 0.2. Without a caption column the data term can only ever be
+    # unconditional, which bounds KL(p_data(x) || p_theta(x|"")) - the
+    # unconditional branch - while the RL term moves p_theta(x|c) for real
+    # prompts. On FLUX.1-dev, which has no unconditional branch at all, those are
+    # disjoint conditioning states and the anchor cannot oppose conditional drift.
+    # None keeps the old unconditional behaviour for datasets that have no
+    # captions, but now as a stated choice rather than the only option.
+    caption_column: str | None = None
+    # Probability of dropping the caption, per DDRL_THEORY.md step 3b. Ignored
+    # when caption_column is None (everything is already unconditional).
+    condition_dropout: float = 0.2
