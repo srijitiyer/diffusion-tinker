@@ -1009,6 +1009,70 @@ def test_eval_without_eval_prompts_warns_about_training_overlap():
     print("  eval falls back to training prompts loudly, in both trainers: OK")
 
 
+def test_flux_uses_its_own_sigma_schedule():
+    """FLUX must get an explicit sigma grid; SD3 must not.
+
+    FluxPipeline.__call__ always passes sigmas = linspace(1.0, 1/N, N) to the
+    scheduler. StableDiffusion3Pipeline passes sigmas=None and lets the scheduler
+    build its own. The FLUX sampler here was written by copying the SD3 one and
+    inherited the omission, so the scheduler fell back to a linspace over
+    _sigma_to_t which bottoms out at 1/num_train_timesteps = 0.001 instead of 1/N.
+
+    Measured at 512px with N=28, the schedule ended 0.1321, 0.0690, 0.0019 rather
+    than 0.1839, 0.1262, 0.0650: the last Euler step covered 0.19% of the
+    trajectory while the step before it absorbed the entire low-noise refinement
+    range. Every FLUX image this repo produced before the fix - rollouts and evals
+    alike - came off that grid.
+
+    Checked numerically against the scheduler rather than by grepping the source,
+    so it fails if a future diffusers changes the fallback behaviour.
+    """
+    import numpy as np
+
+    try:
+        from diffusers import FlowMatchEulerDiscreteScheduler
+    except Exception:
+        import pytest
+        pytest.skip("diffusers not available")
+
+    cfg = dict(num_train_timesteps=1000, shift=3.0, use_dynamic_shifting=True,
+               base_shift=0.5, max_shift=1.15, base_image_seq_len=256,
+               max_image_seq_len=4096)
+    N, mu = 28, 0.7
+
+    fallback = FlowMatchEulerDiscreteScheduler(**cfg)
+    fallback.set_timesteps(N, device="cpu", mu=mu)
+
+    explicit = FlowMatchEulerDiscreteScheduler(**cfg)
+    explicit.set_timesteps(N, device="cpu", mu=mu,
+                           sigmas=np.linspace(1.0, 1.0 / N, N))
+
+    last_fallback = float(fallback.sigmas[-2])
+    last_explicit = float(explicit.sigmas[-2])
+
+    # The bug is only interesting if the two schedules actually differ; if a
+    # future diffusers makes the fallback correct, this guard tells us so rather
+    # than silently passing.
+    assert last_fallback < last_explicit / 10, (
+        "the scheduler fallback no longer degrades the tail - re-check whether "
+        "flux_patch still needs to pass sigmas explicitly"
+    )
+
+    # And the sampler must be passing the explicit grid.
+    import inspect
+
+    from diffusion_tinker.models import flux_patch
+
+    src = inspect.getsource(flux_patch.flux_sample_with_logprob)
+    assert 'sched_kwargs["sigmas"]' in src or "sigmas=" in src.split("set_timesteps")[0][-400:], (
+        "FLUX sampler does not pass an explicit sigma grid, so the scheduler "
+        f"falls back to a tail of {last_fallback:.5f} instead of {last_explicit:.5f}"
+    )
+
+    print(f"  FLUX passes its own sigma grid (tail {last_explicit:.4f}, "
+          f"not {last_fallback:.4f}): OK")
+
+
 def test_reward_resolve():
     """Test reward registry and resolution."""
     # String resolution

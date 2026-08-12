@@ -145,6 +145,22 @@ def flux_sample_with_logprob(
             mu = image_seq_len * slope + (sc.base_shift - slope * sc.base_image_seq_len)
         sched_kwargs["mu"] = mu
 
+    # FLUX needs its sigma grid passed explicitly. FluxPipeline.__call__ always
+    # sets sigmas = linspace(1.0, 1/N, N) before calling the scheduler;
+    # StableDiffusion3Pipeline leaves sigmas=None and lets the scheduler build its
+    # own. This call was copied from the SD3 path and omitted the argument, so the
+    # scheduler fell back to linspace over _sigma_to_t, which bottoms out at
+    # 1/num_train_timesteps = 0.001 rather than 1/N.
+    #
+    # Measured at 512px, N=28: the schedule ended 0.1321, 0.0690, 0.0019 against
+    # the correct 0.1839, 0.1262, 0.0650. The final Euler step covered |dt|=0.0019,
+    # 0.19% of the trajectory - one wasted step in 28 - and the step before it had
+    # to absorb the whole low-noise refinement range in a single jump. Every FLUX
+    # rollout and every FLUX eval image in this repo before this fix was produced
+    # on that grid, so FLUX's baseline was depressed against stock FLUX and
+    # FLUX-vs-SD3 comparisons were not like-for-like.
+    import numpy as _np
+    sched_kwargs["sigmas"] = _np.linspace(1.0, 1.0 / num_inference_steps, num_inference_steps)
     pipeline.scheduler.set_timesteps(num_inference_steps, device=device, **sched_kwargs)
     sigmas = pipeline.scheduler.sigmas
 
