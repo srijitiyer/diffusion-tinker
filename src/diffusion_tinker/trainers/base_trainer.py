@@ -382,6 +382,48 @@ class BaseDiffusionTrainer(ABC):
         ]
         return "|".join(parts)
 
+    def _stateful_tracker(self):
+        """The tracker that actually carries history across epochs, if any.
+
+        There are two. `self.stat_tracker` is a PerPromptStatTracker and is
+        stateless - it holds only `eps` and `global_std`, and recomputes from the
+        batch every call. DDPO's is a BufferedPerPromptStatTracker holding a
+        per-prompt deque of past rewards, and DDPOTrainer keeps it on
+        `self._ddpo_tracker`, a different attribute.
+
+        This previously read `getattr(self.stat_tracker, "stats", None)`, which is
+        None for every trainer that exists: the stateless tracker has no `stats`
+        and the stateful one was never looked at. So the documented "advantage
+        tracker" half of resume never saved anything, and DDPO resumed with every
+        prompt's history empty - falling back to whole-batch statistics for the
+        next min_count/group_size epochs, which is the GRPO estimator rather than
+        DDPO's. Since arms crash at different rates, how much of a run used the
+        wrong estimator rode along with the variable under comparison.
+        """
+        for attr in ("_ddpo_tracker", "stat_tracker"):
+            t = getattr(self, attr, None)
+            if t is not None and hasattr(t, "stats"):
+                return t
+        return None
+
+    def _tracker_state(self):
+        """Per-prompt reward history, as plain lists (a deque does not pickle back
+        with its maxlen intact in a form we want to depend on)."""
+        t = self._stateful_tracker()
+        if t is None:
+            return None
+        return {prompt: list(buf) for prompt, buf in t.stats.items()}
+
+    def _restore_tracker_state(self, tracked):
+        if tracked is None:
+            return
+        t = self._stateful_tracker()
+        if t is None:
+            return
+        from collections import deque
+        maxlen = getattr(t, "buffer_size", None)
+        t.stats = {prompt: deque(vals, maxlen=maxlen) for prompt, vals in tracked.items()}
+
     def _save_state(self, next_epoch: int):
         """Everything needed to continue as if the crash had not happened.
 
@@ -401,7 +443,7 @@ class BaseDiffusionTrainer(ABC):
                 "global_step": self.global_step,
                 "best_eval_reward": self._best_eval_reward,
                 "evals_without_improvement": self._evals_without_improvement,
-                "stat_tracker": getattr(self.stat_tracker, "stats", None),
+                "stat_tracker": self._tracker_state(),
                 "fingerprint": self._state_fingerprint(),
                 # RNG too. Without it a resumed run draws different rollout noise
                 # and prompt subsets than an uninterrupted one, which is fine only
@@ -445,9 +487,7 @@ class BaseDiffusionTrainer(ABC):
         self.global_step = state.get("global_step", 0)
         self._best_eval_reward = state.get("best_eval_reward", -float("inf"))
         self._evals_without_improvement = state.get("evals_without_improvement", 0)
-        tracked = state.get("stat_tracker")
-        if tracked is not None and hasattr(self.stat_tracker, "stats"):
-            self.stat_tracker.stats = tracked
+        self._restore_tracker_state(state.get("stat_tracker"))
         rng_cpu = state.get("rng_cpu")
         if rng_cpu is not None:
             torch.set_rng_state(rng_cpu.cpu() if hasattr(rng_cpu, "cpu") else rng_cpu)

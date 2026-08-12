@@ -111,7 +111,6 @@ class DRaFTTrainer:
         dtype = self.pipeline.transformer.dtype
         config = self.config
         batch_size = len(prompts)
-        K = config.truncation_steps
 
         missing = [p for p in prompts if p not in self._embed_cache]
         if missing:
@@ -142,6 +141,9 @@ class DRaFTTrainer:
         latents = latents * sigmas[0]
 
         num_steps = len(sigmas) - 1
+        # None means full chain (AlignProp-style), which draft_config documents and
+        # which previously raised TypeError here on `num_steps - None`.
+        K = config.truncation_steps if config.truncation_steps is not None else num_steps
         grad_start = max(0, num_steps - K)
 
         self.transformer.eval()
@@ -289,7 +291,15 @@ class DRaFTTrainer:
                         pipeline=self.pipeline,
                         prompts=eval_prompts[i : i + chunk],
                         num_inference_steps=config.num_eval_inference_steps,
-                        guidance_scale=config.guidance_scale,
+                        # 1.0, not config.guidance_scale. _denoise_with_grad runs a
+                        # single un-doubled transformer call with
+                        # do_classifier_free_guidance=False, i.e. the reward gradient
+                        # is taken w.r.t. the UNGUIDED conditional sampler. Evaluating
+                        # at 7.0 then measured a sampler that was never the
+                        # optimisation target, and CFG multiplies the learned shift by
+                        # roughly the guidance scale, so the optimised direction was
+                        # over-applied at eval. Measure what was trained.
+                        guidance_scale=1.0,
                         noise_level=0.0,
                         height=config.resolution,
                         width=config.resolution,

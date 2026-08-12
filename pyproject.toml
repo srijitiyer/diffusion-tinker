@@ -12,7 +12,6 @@ requires-python = ">=3.10"
 authors = [
     {name = "Srijit Iyer"},
     {name = "Haotian Ye"},
-    {name = "Jiaqi Han"},
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",

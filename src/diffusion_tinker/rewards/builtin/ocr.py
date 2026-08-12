@@ -125,10 +125,19 @@ class OCRReward(BaseReward):
         if not target_norm:
             return 0.0
 
-        # Exact or near-exact substring match scores 1.0, but guard against a
-        # short target matching as a substring of much longer recognized text
-        # (e.g. "cat" inside "concatenate"), which would be a false positive.
-        if target_norm in recognized_norm and len(recognized_norm) <= 1.5 * len(target_norm):
+        # Canonical FlowGRPO behaviour: if the target appears anywhere in the
+        # recognized text the distance is 0, so incidental extra text in the image
+        # does not penalise a correct render (REWARD_MODELS_TECHNICAL.md:555).
+        #
+        # This previously carried a `len(recognized_norm) <= 1.5 * len(target_norm)`
+        # guard, added to stop "cat" matching inside "concatenate". It did stop
+        # that, and it also scored a *perfectly rendered* target as 0.0 whenever
+        # the image contained any other text: with a 3-character target the guard
+        # tolerated at most 4 recognized characters, so one watermark or a second
+        # sign took a correct image from 1.0 to 0.0. That false-negative cost is
+        # far larger than the false positive it prevented, and it is one-directional
+        # (downward), which is the worst kind for an RL reward.
+        if target_norm in recognized_norm:
             return 1.0
 
         dist = _edit_distance(recognized_norm, target_norm)
@@ -171,5 +180,19 @@ class OCRExactReward(OCRReward):
         target_norm = target.replace(" ", "").lower()
         if not target_norm:
             return 0.0
-        return 1.0 if target_norm in recognized_norm else 0.0
+        # Equality, which is what "exact match" means and what this class is named
+        # for. It previously returned `target_norm in recognized_norm` - bare
+        # containment with no guard at all, so "cat" scored 1.0 inside
+        # "concatenate", and it was *more* permissive than the edit-distance
+        # reward it claims to be stricter than. It was also hackable in the
+        # direction RL exploits: rendering more text raises the chance of
+        # containing the target.
+        #
+        # Every FLUX result recorded in VALIDATION.md used the containment
+        # version. Those comparisons stay internally valid - every arm was scored
+        # by the same function - but the absolute numbers meant "the target
+        # appears somewhere in the image's text", not "the model rendered the
+        # target". Numbers from before this change are not comparable with
+        # numbers after it.
+        return 1.0 if recognized_norm == target_norm else 0.0
 

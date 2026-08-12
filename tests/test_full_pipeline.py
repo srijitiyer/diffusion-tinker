@@ -15,7 +15,9 @@ import torch.nn as nn
 from PIL import Image
 
 from diffusion_tinker.core.noise_strategy import compute_flow_matching_loss, sde_step_with_logprob
-from diffusion_tinker.core.stat_tracking import PerPromptStatTracker
+from collections import deque
+
+from diffusion_tinker.core.stat_tracking import BufferedPerPromptStatTracker, PerPromptStatTracker
 from diffusion_tinker.core.trajectory import TrajectoryBatch
 from diffusion_tinker.rewards.base import BaseReward
 from diffusion_tinker.rewards.protocol import RewardContext, RewardOutput
@@ -368,6 +370,25 @@ def test_kl_variance_finite_at_sigma_one():
     print("  kl variance finite at sigma=1: OK")
 
 
+def _bind_trainer_helpers(stub):
+    """Give a SimpleNamespace stub every private helper _save_state/_load_state
+    calls on self.
+
+    Bound in one place rather than at each stub, because four tests build these
+    and patching them individually is how a new helper silently breaks three of
+    them - the same single-site-fix pattern that produced several of the defects
+    this suite now pins.
+    """
+    from diffusion_tinker.trainers.base_trainer import BaseDiffusionTrainer
+
+    stub._state_path = lambda: BaseDiffusionTrainer._state_path(stub)
+    stub._state_fingerprint = lambda: BaseDiffusionTrainer._state_fingerprint(stub)
+    stub._stateful_tracker = lambda: BaseDiffusionTrainer._stateful_tracker(stub)
+    stub._tracker_state = lambda: BaseDiffusionTrainer._tracker_state(stub)
+    stub._restore_tracker_state = lambda t: BaseDiffusionTrainer._restore_tracker_state(stub, t)
+    return stub
+
+
 def test_resume_state_roundtrip():
     """A crash must cost wall-clock, not training progress.
 
@@ -410,12 +431,17 @@ def test_resume_state_roundtrip():
             global_step=7,
             _best_eval_reward=0.62,
             _evals_without_improvement=2,
-            stat_tracker=SimpleNamespace(stats={"a cat": [0.1, 0.2]}),
+            # A REAL tracker, not a stub with a stats attribute invented to match
+            # what the save path happened to read. The previous version of this
+            # test asserted against SimpleNamespace(stats=...), a shape no trainer
+            # has: PerPromptStatTracker is stateless and DDPO keeps its buffered
+            # tracker on `_ddpo_tracker`. So the test passed while the real code
+            # saved None on every trainer and restored nothing.
+            stat_tracker=PerPromptStatTracker(),
+            _ddpo_tracker=BufferedPerPromptStatTracker(buffer_size=32, min_count=16),
         )
-        # the stub stands in for a trainer, so it needs the one helper the
-        # save/load pair calls on self
-        stub._state_path = lambda: BaseDiffusionTrainer._state_path(stub)
-        stub._state_fingerprint = lambda: BaseDiffusionTrainer._state_fingerprint(stub)
+        stub._ddpo_tracker.stats["a cat"] = deque([0.1, 0.2], maxlen=32)
+        _bind_trainer_helpers(stub)
         BaseDiffusionTrainer._save_state(stub, next_epoch=5)
 
         saved_adapter = {k: v.clone() for k, v in get_peft_model_state_dict(model).items()}
@@ -430,7 +456,7 @@ def test_resume_state_roundtrip():
         stub.global_step = 0
         stub._best_eval_reward = -float("inf")
         stub._evals_without_improvement = 0
-        stub.stat_tracker = SimpleNamespace(stats={})
+        stub._ddpo_tracker = BufferedPerPromptStatTracker(buffer_size=32, min_count=16)
 
         start = BaseDiffusionTrainer._load_state(stub)
 
@@ -438,7 +464,12 @@ def test_resume_state_roundtrip():
     assert stub.global_step == 7
     assert abs(stub._best_eval_reward - 0.62) < 1e-9, "best reward not restored, so save_best would regress"
     assert stub._evals_without_improvement == 2
-    assert stub.stat_tracker.stats == {"a cat": [0.1, 0.2]}, "DDPO's reward history did not survive"
+    assert list(stub._ddpo_tracker.stats.get("a cat", [])) == [0.1, 0.2], (
+        "DDPO's reward history did not survive the round trip. Without it every "
+        "prompt's buffer is empty on resume, so BufferedPerPromptStatTracker falls "
+        "back to whole-batch statistics until the buffers refill - which is the "
+        "GRPO estimator, not DDPO's."
+    )
 
     restored = get_peft_model_state_dict(model)
     for k, v in saved_adapter.items():
@@ -480,8 +511,7 @@ def test_resume_refuses_mismatched_config():
             global_step=3, _best_eval_reward=0.6, _evals_without_improvement=0,
             stat_tracker=SimpleNamespace(stats={}),
         )
-        stub._state_path = lambda: BaseDiffusionTrainer._state_path(stub)
-        stub._state_fingerprint = lambda: BaseDiffusionTrainer._state_fingerprint(stub)
+        _bind_trainer_helpers(stub)
         return stub
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -530,8 +560,7 @@ def test_resume_restores_rng():
             global_step=0, _best_eval_reward=0.0, _evals_without_improvement=0,
             stat_tracker=SimpleNamespace(stats={}),
         )
-        stub._state_path = lambda: BaseDiffusionTrainer._state_path(stub)
-        stub._state_fingerprint = lambda: BaseDiffusionTrainer._state_fingerprint(stub)
+        _bind_trainer_helpers(stub)
 
         torch.manual_seed(1234)
         random.seed(1234)
@@ -611,8 +640,7 @@ def test_resume_is_transparent():
             global_step=1, _best_eval_reward=0.0, _evals_without_improvement=0,
             stat_tracker=SimpleNamespace(stats={}),
         )
-        stub._state_path = lambda: BaseDiffusionTrainer._state_path(stub)
-        stub._state_fingerprint = lambda: BaseDiffusionTrainer._state_fingerprint(stub)
+        _bind_trainer_helpers(stub)
         BaseDiffusionTrainer._save_state(stub, next_epoch=1)
 
         c_model, c_opt = fresh()          # the fresh process after the crash

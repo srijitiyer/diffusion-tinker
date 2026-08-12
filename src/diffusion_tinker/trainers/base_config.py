@@ -165,3 +165,44 @@ class BaseDiffusionConfig:
     # improving throughout, so nothing about this is visible without a held-out
     # eval, and the best checkpoint is already being written on improvement.
     early_stop_patience: int = 0
+
+    def __post_init__(self):
+        """Reject configurations that would otherwise fail silently.
+
+        Every check here corresponds to a way the library previously accepted a
+        setting and then did something other than what it said. None of these
+        raised before; they produced a run that looked normal and reported a
+        number that meant something else.
+        """
+        if self.mixed_precision not in ("bf16", "fp16"):
+            # Ten call sites read `bfloat16 if mixed_precision == "bf16" else
+            # float16`, so "fp32", "no", or a typo silently selected fp16 - not an
+            # error, and specifically not the fp32 a user asking for "fp32" wanted.
+            raise ValueError(
+                f"mixed_precision must be 'bf16' or 'fp16', got {self.mixed_precision!r}. "
+                "Any other value silently selected fp16."
+            )
+
+        if self.model_type not in ("auto", "sd3", "flux"):
+            # _setup_model branches on == "flux" and falls through to SD3, so
+            # model_type="sdxl" loaded SD3.5 without complaint.
+            raise ValueError(
+                f"model_type must be 'auto', 'sd3' or 'flux', got {self.model_type!r}. "
+                "Any other value silently loaded the SD3 pipeline."
+            )
+
+        if self.num_samples_per_prompt < 2:
+            # A group of one has zero within-group spread, so every advantage is
+            # (r - r)/(0 + eps) = 0, the zero-signal filter skips every epoch, and
+            # the run prints "training complete" having never stepped the
+            # optimizer.
+            raise ValueError(
+                f"num_samples_per_prompt must be at least 2, got "
+                f"{self.num_samples_per_prompt}. A group of one has no within-group "
+                "spread, so every advantage is exactly zero and no epoch ever trains."
+            )
+
+        if not 0.0 < self.timestep_fraction <= 1.0:
+            raise ValueError(
+                f"timestep_fraction must be in (0, 1], got {self.timestep_fraction}"
+            )

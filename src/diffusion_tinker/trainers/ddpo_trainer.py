@@ -138,7 +138,15 @@ class DDPOTrainer(BaseDiffusionTrainer):
                         with torch.no_grad():
                             self.transformer.disable_adapters()
                             try:
-                                with torch.autocast(device_type=device.type, dtype=autocast_dtype):
+                                # cache_enabled=False, matching the policy forward above
+                                # and FlowGRPO's identical block. Without it the two
+                                # means come out under different cast regimes, so the
+                                # DPOK KL has a nonzero floor that is numerical noise
+                                # rather than policy drift - and it is divided by
+                                # 2*sigma^2, which is small at low sigma, so a bf16
+                                # difference is amplified. kl_beta defaults to 0, so no
+                                # recorded result is affected.
+                                with torch.autocast(device_type=device.type, dtype=autocast_dtype, cache_enabled=False):
                                     _, prev_sample_mean_ref = self._replay_step(
                                         transformer=self.transformer,
                                         latent_t=latent_t,
