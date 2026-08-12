@@ -84,7 +84,19 @@ class BaseDiffusionConfig:
     resolution: int = 512
 
     # RL
-    clip_range: float = 0.2
+    # 1e-3, not the 0.2 that PPO implementations usually carry, because the
+    # log-prob here is *mean*-reduced over the latent dimensions rather than
+    # summed (`log_prob.mean(dim=...)` in noise_strategy). That keeps the
+    # importance ratio within a whisker of 1 - measured 0.9977 to 0.9995 across
+    # every validated run, so |ratio - 1| stays under 0.0025. A clip_range of 0.2
+    # clamps to [0.8, 1.2] and therefore never binds: the trust region silently
+    # does nothing and training runs as unclipped policy gradient. This default
+    # was 0.2 and every result in VALIDATION.md was produced at 1e-3.
+    #
+    # If you switch the reduction to a sum, raise this accordingly - the right
+    # value scales with how far the ratio actually moves, which `mean_ratio` in
+    # the logged metrics reports.
+    clip_range: float = 1e-3
     adv_clip_max: float = 5.0
     # Train only on the first timestep_fraction of denoising steps (the higher-
     # sigma ones). The last low-sigma steps have std_dev_t -> 0, where the SDE

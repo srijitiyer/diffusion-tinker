@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import random
+import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
 
@@ -479,7 +480,28 @@ class BaseDiffusionTrainer(ABC):
         self.transformer.eval()
         if self.config.offload_text_encoders:
             self._set_text_encoders_device(self.device)
-        base_prompts = self.config.eval_prompts or self.train_prompts[: self.config.num_eval_prompts]
+        if self.config.eval_prompts:
+            base_prompts = self.config.eval_prompts
+        else:
+            # Falling back to training prompts means the "held-out" curve is not
+            # held out, and the number will read as improvement when the model is
+            # only overfitting. Evaluating on train_prompts[:4] with no fixed seed
+            # is the defect that invalidated every pre-audit curve in this
+            # project; the seed half was fixed, this half is a silent default.
+            # Warn once, loudly, rather than quietly reporting a metric that does
+            # not mean what its name says.
+            if not getattr(self, "_warned_eval_overlap", False):
+                warnings.warn(
+                    "eval_prompts is not set, so evaluation is running on the "
+                    f"first {self.config.num_eval_prompts} TRAINING prompts. The "
+                    "resulting curve measures fit to data the model is training "
+                    "on, not generalisation, and will rise while held-out "
+                    "performance falls. Set eval_prompts to a disjoint list for a "
+                    "real held-out metric.",
+                    stacklevel=2,
+                )
+                self._warned_eval_overlap = True
+            base_prompts = self.train_prompts[: self.config.num_eval_prompts]
         # Repeat each prompt so the mean is over more than one image per prompt.
         eval_prompts = [p for p in base_prompts for _ in range(self.config.num_eval_samples_per_prompt)]
 

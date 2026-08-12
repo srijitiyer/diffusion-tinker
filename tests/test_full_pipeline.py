@@ -889,6 +889,61 @@ def test_dropped_captions_are_substituted_not_zeroed():
     print("  dropped captions substitute an encoded empty prompt: OK")
 
 
+def test_defaults_are_the_ones_that_were_validated():
+    """A user running out of the box must not get a silently inert trust region.
+
+    The log-prob is mean-reduced over the latent dimensions rather than summed
+    (`log_prob.mean(dim=...)` in noise_strategy), which keeps the importance ratio
+    within a whisker of 1 - measured 0.9977 to 0.9995 across every validated run,
+    so |ratio - 1| stays under 0.0025. PPO's usual clip_range of 0.2 clamps to
+    [0.8, 1.2] and can therefore never bind: the trust region does nothing and
+    training silently runs as unclipped policy gradient.
+
+    The default was 0.2 while every result in VALIDATION.md was produced at 1e-3,
+    so nobody using the library got the configuration the numbers came from.
+    """
+    from diffusion_tinker.trainers.base_config import BaseDiffusionConfig
+
+    cfg = BaseDiffusionConfig()
+    observed_ratio_deviation = 0.0025  # max |ratio - 1| seen on hardware
+    assert cfg.clip_range < observed_ratio_deviation, (
+        f"clip_range={cfg.clip_range} cannot bind: the ratio only moves by "
+        f"{observed_ratio_deviation} with a mean-reduced log-prob, so the trust "
+        "region is inert and this is unclipped policy gradient"
+    )
+
+    print(f"  default clip_range={cfg.clip_range} can actually bind: OK")
+
+
+def test_eval_without_eval_prompts_warns_about_training_overlap():
+    """Evaluating on training prompts must not pass silently.
+
+    `eval_prompts=None` falls back to `train_prompts[:num_eval_prompts]`, so the
+    curve labelled held-out is computed on data the model trains on. It rises
+    while generalisation falls, which is exactly how the pre-audit curves in this
+    project misled for months - the fixed-seed half of that defect was repaired
+    and this half was left as a default.
+
+    The fallback is kept rather than removed, because refusing to evaluate would
+    break callers who genuinely want a training-set curve. It now says so.
+    """
+    import inspect
+
+    from diffusion_tinker.trainers.base_trainer import BaseDiffusionTrainer
+
+    src = inspect.getsource(BaseDiffusionTrainer._evaluate)
+    assert "warnings.warn" in src, "silent fallback to training prompts"
+    assert "TRAINING prompts" in src, (
+        "the warning must say plainly that the eval set is the training set"
+    )
+    # and it must fire before the prompts are used, not after
+    warn_at = src.index("warnings.warn")
+    use_at = src.index("base_prompts = self.train_prompts")
+    assert warn_at < use_at
+
+    print("  eval falls back to training prompts loudly: OK")
+
+
 def test_reward_resolve():
     """Test reward registry and resolution."""
     # String resolution

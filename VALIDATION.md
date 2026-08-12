@@ -1714,6 +1714,32 @@ What is actually unresolved:
   `t_probe_server.py` does, and what should have been built before the first FLUX
   attempt rather than after the fifth.
 
+### Defaults a user actually gets
+
+Audited separately from the science, because every result in this file was
+produced with an explicit config and nothing had checked what happens to someone
+who accepts the defaults. Two of them were wrong in ways that fail silently.
+
+**`clip_range` was 0.2 and is now 1e-3.** The log-prob is mean-reduced over the
+latent dimensions rather than summed, which holds the importance ratio between
+0.9977 and 0.9995 across every validated run - `|ratio - 1|` under 0.0025. A
+clip_range of 0.2 clamps to [0.8, 1.2] and so can never bind: the PPO trust
+region was inert and training ran as unclipped policy gradient. Every number in
+this file was produced at 1e-3, so no user was running the configuration the
+results came from.
+
+**`eval_prompts=None` silently evaluated on training prompts.** The fallback is
+`train_prompts[:num_eval_prompts]`, so the curve labelled held-out was computed on
+data the model trains on - it rises while generalisation falls. This is half of
+audit defect §2: the fixed-seed half was repaired, this half survived as a
+default. The fallback is kept, because a caller may genuinely want a training-set
+curve, but it now warns once and says plainly that the eval set is the training
+set.
+
+Both are pinned by tests verified non-vacuous by restoring the old behaviour.
+Neither would have raised an error; both would have quietly produced numbers that
+did not mean what they were labelled.
+
 Deliberate deviations, not bugs: the log-prob is mean-reduced rather than summed
 (which is what makes `clip_range=1e-3` sane), `torch.std` is Bessel-corrected
 where the reference numpy is not (~4.5% advantage scale at group 12), and the
