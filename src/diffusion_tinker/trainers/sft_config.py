@@ -37,7 +37,12 @@ class SFTConfig(BaseDiffusionConfig):
     # whether the loss falls on data the model is not fitting - the training loss
     # falls either way. This existed only as a run-script callback, which meant
     # anyone using SFTTrainer directly got no held-out signal at all. 0 disables.
-    holdout_size: int = 0
+    # 0 disables the held-out eval, which means the only number reported is the
+    # training loss - and a denoising objective's training loss falls by
+    # construction, so it looks like progress whatever the model is doing. That
+    # was the original DRaFT/SFT defect. Default to holding out a small slice so
+    # the turnover is visible; set 0 deliberately to train on everything.
+    holdout_size: int = 16
     # Steps between validation passes. The held-out batch is encoded once and its
     # noise and timesteps are fixed, so a pass is one forward and cheap.
     eval_every_steps: int = 100

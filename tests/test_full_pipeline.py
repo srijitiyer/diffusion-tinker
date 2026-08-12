@@ -904,15 +904,44 @@ def test_defaults_are_the_ones_that_were_validated():
     """
     from diffusion_tinker.trainers.base_config import BaseDiffusionConfig
 
-    cfg = BaseDiffusionConfig()
     observed_ratio_deviation = 0.0025  # max |ratio - 1| seen on hardware
-    assert cfg.clip_range < observed_ratio_deviation, (
-        f"clip_range={cfg.clip_range} cannot bind: the ratio only moves by "
-        f"{observed_ratio_deviation} with a mean-reduced log-prob, so the trust "
-        "region is inert and this is unclipped policy gradient"
+
+    # Checked across every config that declares clip_range, not just the base.
+    # Subclass configs shadow the base default, so fixing base_config alone left
+    # FlowGRPO and DDPO running unclipped - the fix looked complete and was not.
+    from diffusion_tinker.trainers.ddpo_config import DDPOConfig
+    from diffusion_tinker.trainers.ddrl_config import DDRLConfig
+    from diffusion_tinker.trainers.flowgrpo_config import FlowGRPOConfig
+
+    for cls in (BaseDiffusionConfig, FlowGRPOConfig, DDPOConfig, DDRLConfig):
+        cfg = cls()
+        assert cfg.clip_range < observed_ratio_deviation, (
+            f"{cls.__name__}.clip_range={cfg.clip_range} cannot bind: the ratio "
+            f"only moves by {observed_ratio_deviation} with a mean-reduced "
+            "log-prob, so the trust region is inert and this is unclipped policy "
+            "gradient"
+        )
+
+    print("  every config's default clip_range can actually bind: OK")
+
+
+def test_sft_reports_a_held_out_number_by_default():
+    """SFT must not default to reporting only its training loss.
+
+    A denoising objective's training loss falls by construction, so on its own it
+    looks like progress no matter what the model is doing - that is the defect
+    DRaFT and SFT both had. `holdout_size` was added to fix it and then defaulted
+    to 0, which left the fix switched off for anyone who did not know to ask.
+    """
+    from diffusion_tinker.trainers.sft_config import SFTConfig
+
+    cfg = SFTConfig()
+    assert cfg.holdout_size > 0, (
+        "SFT defaults to no held-out set, so the only number a user sees is the "
+        "training loss, which decreases regardless of whether anything is learned"
     )
 
-    print(f"  default clip_range={cfg.clip_range} can actually bind: OK")
+    print(f"  SFT holds out {cfg.holdout_size} examples by default: OK")
 
 
 def test_eval_without_eval_prompts_warns_about_training_overlap():

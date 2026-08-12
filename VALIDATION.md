@@ -1736,9 +1736,22 @@ default. The fallback is kept, because a caller may genuinely want a training-se
 curve, but it now warns once and says plainly that the eval set is the training
 set.
 
-Both are pinned by tests verified non-vacuous by restoring the old behaviour.
-Neither would have raised an error; both would have quietly produced numbers that
-did not mean what they were labelled.
+**The `clip_range` fix was itself incomplete for an hour.** `FlowGRPOConfig` and
+`DDPOConfig` each redeclare `clip_range = 0.2`, shadowing the base default, so
+correcting `base_config` alone reached only DDRL - the two trainers a new user is
+most likely to reach for were still running unclipped. Both now carry 1e-3, and
+the test iterates over every config class that declares the field rather than
+checking the base one, because that is the failure that actually happened.
+
+**`SFTConfig.holdout_size` defaulted to 0**, which switched off the held-out eval
+that was added to fix SFT's original defect. A denoising objective's training loss
+falls by construction, so with no held-out number the only signal a user sees goes
+down whatever the model is doing - which is exactly the thing that made the
+pre-audit SFT and DRaFT results meaningless. Now defaults to 16.
+
+All are pinned by tests verified non-vacuous by restoring the old behaviour. None
+would have raised an error; all would have quietly produced numbers that did not
+mean what they were labelled.
 
 Deliberate deviations, not bugs: the log-prob is mean-reduced rather than summed
 (which is what makes `clip_range=1e-3` sane), `torch.std` is Bessel-corrected

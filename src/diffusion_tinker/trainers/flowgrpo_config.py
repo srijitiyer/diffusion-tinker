@@ -19,7 +19,11 @@ class FlowGRPOConfig(BaseDiffusionConfig):
     kl_beta: float = 0.0
 
     # PPO clip range (larger than DDRL's 1e-4 since advantages aren't compressed)
-    clip_range: float = 0.2
+    # 1e-3, not 0.2: the log-prob is mean-reduced, so the importance ratio stays
+    # within 0.0025 of 1 and a 0.2 clip can never bind. See base_config for the
+    # measurement. This redeclaration shadowed the base default, so fixing that
+    # one alone left this trainer running unclipped.
+    clip_range: float = 1e-3
 
     # GRPO-Guard: normalize importance ratios per group
     use_grpo_guard: bool = False
