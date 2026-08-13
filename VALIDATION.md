@@ -11,6 +11,22 @@ smoke tests. "Validated" = the intended objective actually moves in a real run.
 > unverified**, including the grid figure. Rows below are either re-measured on
 > fixed code or explicitly marked as pending.
 
+> **August 2026: the FLUX arms are being re-run and the old numbers are
+> superseded.** Three changes invalidate every FLUX result recorded below.
+> (1) The FLUX sampler never passed its sigma grid, so the scheduler fell back to
+> a schedule whose final Euler step covered 0.19% of the trajectory - every FLUX
+> image in this project, rollout and eval alike, came off that grid.
+> (2) `ocr_exact` was substring containment rather than exact match, so it scored
+> "target appears somewhere in the image's text" and was hackable by rendering
+> more text. (3) The DDRL anchor was unconditional for every sample where
+> DDRL_THEORY.md step 3b specifies the anchor image's own caption with 0.2
+> dropout. The *comparisons* below remain internally valid - every arm shared
+> the same sampler and reward - but the absolute values and the FLUX-vs-SD3
+> contrast do not mean what they say. `vn42/43/44` (unanchored) and `va42/43/44`
+> (anchored, FLUX-generated anchor set, captions on) are the re-run, launched on
+> the corrected code and interleaved by seed. Expect the OCR baseline to drop:
+> exact match is a strictly harder reward than containment.
+
 > **August 2026 retraction.** The quiet-RL-term explanation for the FLUX anchor
 > collapse is withdrawn: `has_signal` was true in all 59 epochs of both arms, so
 > the term was never quiet (`report/analyze_flux_anchor.py`). The behaviour is
