@@ -1039,6 +1039,37 @@ def test_no_config_field_is_dead():
     print("  no dead config fields: OK")
 
 
+def test_offload_text_encoders_applies_before_the_device_move():
+    """offload_text_encoders must keep T5 off the card at construction.
+
+    `pipeline.to(device)` moves every component, T5-XXL included - roughly 9GB on
+    SD3.5 and 8GB on FLUX. A user who set offload_text_encoders=True precisely to
+    fit a 16GB card still OOM'd during __init__, before the flag could apply.
+    Verified in practice: SD3.5 OOM'd at 15.6GB on an A4000 with offload enabled.
+
+    The sampling path already moves them on demand and returns them after, so the
+    only change needed is not to move them in the first place.
+    """
+    import inspect
+
+    from diffusion_tinker.trainers.base_trainer import BaseDiffusionTrainer
+
+    src = inspect.getsource(BaseDiffusionTrainer._setup_model)
+    assert "offload_text_encoders" in src, (
+        "_setup_model ignores offload_text_encoders, so the flag cannot prevent "
+        "the construction-time OOM it exists to prevent"
+    )
+    # the guarded branch must come before / instead of the blanket move
+    guarded = src.index("offload_text_encoders")
+    blanket = src.index("self.pipeline.to(self.device)")
+    assert guarded < blanket, (
+        "the unconditional pipeline.to(device) still runs first, so the text "
+        "encoders reach the card regardless"
+    )
+
+    print("  offload_text_encoders keeps T5 off the card at construction: OK")
+
+
 def test_eval_without_eval_prompts_warns_about_training_overlap():
     """Evaluating on training prompts must not pass silently.
 

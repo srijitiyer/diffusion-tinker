@@ -87,7 +87,19 @@ class BaseDiffusionTrainer(ABC):
             from diffusion_tinker.models.sd3_patch import SD3ModelConfig
             self.pipeline = StableDiffusion3Pipeline.from_pretrained(model_id, torch_dtype=dtype)
             self.model_config = SD3ModelConfig()
-        self.pipeline.to(self.device)
+        if self.config.offload_text_encoders:
+            # Move the parts that stay resident, and leave the text encoders on
+            # CPU. `pipeline.to(device)` moves everything including T5-XXL, which
+            # is ~9GB for SD3.5 and ~8GB for FLUX, so a user who set
+            # offload_text_encoders=True specifically to fit a smaller card still
+            # OOM'd during construction - before the flag had any chance to apply.
+            # The sampling path already pulls them to the device on demand and
+            # returns them afterwards (_set_text_encoders_device).
+            self.pipeline.transformer.to(self.device)
+            self.pipeline.vae.to(self.device)
+            self._set_text_encoders_device("cpu")
+        else:
+            self.pipeline.to(self.device)
 
         self.transformer = self.pipeline.transformer
         self.vae = self.pipeline.vae
