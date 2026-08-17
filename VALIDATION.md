@@ -11,6 +11,30 @@ smoke tests. "Validated" = the intended objective actually moves in a real run.
 > unverified**, including the grid figure. Rows below are either re-measured on
 > fixed code or explicitly marked as pending.
 
+> **August 2026: the FLUX re-run is complete and supersedes everything below.**
+> Six arms, twenty epochs each, on code with the FLUX sigma grid corrected,
+> `ocr_exact` as real exact match, and the anchor conditioned on the anchor
+> image's own caption with 0.2 dropout per DDRL_THEORY.md step 3b:
+>
+> | K | unanchored | anchored | diff | SE | rank |
+> |---|---|---|---|---|---|
+> | 4 | 0.5382 | 0.4444 | -0.094 | 4.1 | 0/9 |
+> | 8 | 0.5174 | 0.3906 | -0.127 | 3.2 | 0/9 |
+> | 12 | 0.5243 | 0.3472 | -0.177 | 5.4 | 0/9 |
+> | 16 | 0.5234 | 0.3264 | -0.197 | 6.0 | 0/9 |
+> | 19 | 0.5197 | 0.3099 | -0.210 | 7.6 | 0/9 |
+>
+> Per-seed at K=19: unanchored 0.476/0.539/0.544 against anchored
+> 0.281/0.311/0.338. Complete rank separation at every window, and the effect
+> grows monotonically from 4.1 to 7.6 SE as the window extends - the opposite of
+> how every withdrawn finding in this file behaved. All six arms start at an
+> identical 0.583, which independently confirms eval determinism across
+> processes. The anchor harm on FLUX is therefore not an artifact of the degraded
+> sampler, the containment reward, or the unconditional anchor: it survives all
+> three corrections and is larger than the -0.108 originally recorded.
+>
+> **The original superseding note follows.**
+
 > **August 2026: the FLUX arms are being re-run and the old numbers are
 > superseded.** Three changes invalidate every FLUX result recorded below.
 > (1) The FLUX sampler never passed its sigma grid, so the scheduler fell back to
