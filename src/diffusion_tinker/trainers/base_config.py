@@ -39,6 +39,19 @@ class BaseDiffusionConfig:
     # across them", which is what the memory-knob reading assumes and is wrong.)
     train_batch_size: int | None = None
 
+    # Accumulate gradients across the train_batch_size chunks and step ONCE per
+    # epoch, instead of stepping per chunk. This is what makes train_batch_size a
+    # pure memory knob: with it on, the optimizer sees the full rollout batch and
+    # halving the chunk changes peak memory and nothing else.
+    #
+    # Needed to reproduce DDRL. Algorithm 1 collects a rollout, computes every
+    # L^n_t, and line 8 updates once "w.r.t. all L^n_t"; the paper's ~300
+    # iterations are therefore ~300 optimizer steps at a batch of 48 groups x 24
+    # samples. Under minibatch SGD the same run at a chunk of 4 takes 288 steps
+    # per epoch, so 300 epochs is 86,400 steps at the paper's learning rate - a
+    # different optimization, not a different batching.
+    grad_accumulate: bool = False
+
     # When train_prompts is a large pool, sample this many prompts per epoch
     # (a fresh random subset each epoch) instead of rolling out every prompt.
     # Lets you train on a big, diverse prompt set - which gives the reward room

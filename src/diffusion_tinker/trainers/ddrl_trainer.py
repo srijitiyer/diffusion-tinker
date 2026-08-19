@@ -257,8 +257,18 @@ class DDRLTrainer(BaseDiffusionTrainer):
         perm = torch.randperm(batch_size, device=device)
         minibatches = [perm[s:s + mb_size] for s in range(0, batch_size, mb_size)]
 
-        for sl in minibatches:
+        # With accumulation the whole epoch is one optimizer step, so the
+        # gradient is zeroed once here rather than per chunk, and each chunk's
+        # loss is scaled by 1/len(minibatches) so the sum is the mean over the
+        # full batch rather than its total.
+        accumulate = getattr(config, "grad_accumulate", False)
+        accum_scale = len(minibatches) if accumulate else 1
+        if accumulate:
             self.optimizer.zero_grad()
+
+        for sl in minibatches:
+            if not accumulate:
+                self.optimizer.zero_grad()
             mb = trajectory[sl]
             mb_batch_size = len(mb)
 
@@ -426,7 +436,7 @@ class DDRLTrainer(BaseDiffusionTrainer):
                         )
 
                 loss = rl_loss + config.data_beta * data_loss
-                loss = loss / len(timestep_indices)
+                loss = loss / (len(timestep_indices) * accum_scale)
                 if loss.requires_grad:
                     loss.backward()
 
@@ -443,6 +453,19 @@ class DDRLTrainer(BaseDiffusionTrainer):
             # SD3.5's on the same anchor set, so at equal data_beta it consumes
             # more of the clip budget on FLUX. Whether that is actually happening
             # is answerable only by logging the norm, which nothing did.
+            if not accumulate:
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    [p for p in self.transformer.parameters() if p.requires_grad],
+                    config.max_grad_norm,
+                )
+                total_grad_norm += float(grad_norm)
+                num_clips += 1
+                self.optimizer.step()
+
+        if accumulate:
+            # Clip the accumulated gradient once, on the full batch. Clipping per
+            # chunk and then summing would apply the norm bound len(minibatches)
+            # times over, which is a different constraint.
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 [p for p in self.transformer.parameters() if p.requires_grad],
                 config.max_grad_norm,

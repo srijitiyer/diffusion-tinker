@@ -1727,3 +1727,76 @@ def test_prompt_matched_anchor_uses_that_prompts_image_and_embedding():
                 f"row conditioned on prompt {match[0]} was anchored on {got}, "
                 f"which belongs to the other prompt - the shuffle broke alignment"
             )
+
+
+def test_grad_accumulate_gives_one_optimizer_step_per_epoch():
+    """grad_accumulate must make train_batch_size a pure memory knob.
+
+    Algorithm 1 collects a rollout, computes every L^n_t, and line 8 updates once
+    "w.r.t. all L^n_t". The paper's ~300 iterations are ~300 optimizer steps at a
+    batch of 48x24. Under our default minibatch SGD the same epoch at a chunk of 2
+    takes len(batch)/2 steps, so 300 epochs would be tens of thousands of steps at
+    the paper's learning rate - a different optimization, not a different batching.
+
+    Also checks the gradient is clipped once, on the accumulated whole: clipping
+    each chunk and summing applies the norm bound once per chunk.
+    """
+    from types import SimpleNamespace
+
+    import diffusion_tinker.trainers.ddrl_trainer as ddrl_mod
+    from diffusion_tinker.trainers.ddrl_trainer import DDRLTrainer
+
+    B, T, C, H, W = 6, 2, 4, 8, 8
+    sigmas = torch.linspace(0.9, 0.1, T + 1)
+
+    def build(accumulate):
+        traj = TrajectoryBatch(
+            latents=torch.randn(B, T, C, H, W),
+            next_latents=torch.randn(B, T, C, H, W),
+            log_probs=torch.randn(B, T),
+            timesteps=sigmas,
+            prompt_embeds=torch.randn(B, 4, 8),
+            pooled_embeds=torch.randn(B, 8),
+            prompts=["p"] * B,
+            rewards=torch.arange(B, dtype=torch.float32),
+            images=[Image.new("RGB", (8, 8))] * B,
+        )
+        traj.advantages = torch.linspace(-1, 1, B)
+        calls = {"step": 0, "zero": 0}
+        stub = SimpleNamespace(
+            device=torch.device("cpu"),
+            config=DDRLConfig(
+                data_beta=0.0, train_batch_size=2, grad_accumulate=accumulate,
+                mixed_precision="bf16", timestep_fraction=1.0, timestep_stride=1,
+                clip_range=1e-3, adv_clip_max=5.0, noise_level=0.7,
+                guidance_scale=4.5, max_grad_norm=1.0,
+            ),
+            transformer=torch.nn.Linear(4, 4),
+            optimizer=SimpleNamespace(
+                zero_grad=lambda: calls.__setitem__("zero", calls["zero"] + 1),
+                step=lambda: calls.__setitem__("step", calls["step"] + 1),
+            ),
+            _model_type="sd3",
+            _data_latents=None, _data_captions=None, _data_by_prompt=None,
+            _uncond_embeds=None, _uncond_pooled=None,
+            _replay_step=lambda **kw: (
+                torch.zeros(len(kw["latent_t"]), requires_grad=True), None),
+        )
+        return stub, traj, calls
+
+    n_chunks = B // 2  # train_batch_size=2
+
+    stub, traj, calls = build(accumulate=True)
+    out = DDRLTrainer._training_step(stub, traj)
+    assert calls["step"] == 1, (
+        f"grad_accumulate should step once per epoch, stepped {calls['step']}"
+    )
+    assert calls["zero"] == 1, (
+        f"gradient should be zeroed once, not per chunk (got {calls['zero']})"
+    )
+
+    stub, traj, calls = build(accumulate=False)
+    DDRLTrainer._training_step(stub, traj)
+    assert calls["step"] == n_chunks, (
+        f"default is minibatch SGD: expected {n_chunks} steps, got {calls['step']}"
+    )
