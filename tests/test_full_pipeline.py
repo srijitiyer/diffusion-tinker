@@ -1933,3 +1933,44 @@ def test_ocr_reward_matches_flowgrpo_formula():
     # and the cap really binds, so garbage reads floor at 0 rather than going negative
     scorer._ocr_image = lambda _img: "z" * 500
     assert OCRReward._score_single(scorer, object(), "Page 666") == 0.0
+
+
+def test_sde_diffusion_std_matches_flowgrpo_reference():
+    """Our SDE diffusion coefficient must equal flow_grpo's on the real schedules.
+
+    Theirs (flow_grpo/diffusers_patch/sd3_sde_with_logprob.py):
+
+        sigma_max = self.sigmas[1].item()
+        std_dev_t = sqrt(sigma / (1 - where(sigma == 1, sigma_max, sigma))) * noise
+
+    The substitution only ever fires at sigma == 1, which only happens on step 0,
+    where sigma_next IS sigmas[1] - so passing sigma_next reproduces it exactly.
+
+    This started as a clamp to 0.9999, reached independently while fixing the
+    sigma=1 singularity. It is a valid regularization but not theirs: on SD3.5's
+    10-step shift-3 schedule it gave 5.2915 at step 0 against 3.7041, a 43% larger
+    coefficient on the noisiest and most influential step. Every other step already
+    agreed, so this was the one place the sampler diverged from the reference the
+    published numbers were produced with.
+    """
+    from diffusion_tinker.core.noise_strategy import sde_diffusion_std
+
+    noise = 0.7
+    for n_steps, shift in ((10, 3.0), (28, 3.0), (6, 1.0)):
+        t = [1.0 - i / n_steps for i in range(n_steps)] + [0.0]
+        sigmas = [shift * x / (1 + (shift - 1) * x) for x in t]
+        sigma_max = sigmas[1]
+
+        for i in range(n_steps):
+            s, s_next = sigmas[i], sigmas[i + 1]
+            denom = (1 - sigma_max) if s == 1.0 else (1 - s)
+            reference = math.sqrt(s / denom) * noise
+            got = float(sde_diffusion_std(torch.tensor(s), torch.tensor(s_next), noise))
+            assert math.isclose(got, reference, rel_tol=1e-5), (
+                f"{n_steps}-step shift={shift} step {i}: sigma={s:.4f} "
+                f"got {got:.4f}, flow_grpo gives {reference:.4f}"
+            )
+
+    # and it is still finite at the singularity, which is what the clamp was for
+    v = float(sde_diffusion_std(torch.tensor(1.0), torch.tensor(0.9643), noise))
+    assert math.isfinite(v) and v > 0

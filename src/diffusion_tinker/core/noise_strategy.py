@@ -32,9 +32,23 @@ def sde_diffusion_std(
     the same variance as the transition the policy actually sampled from, so they
     call this rather than re-deriving it.
     """
-    sigma_clamped = sigma.clamp(max=0.9999)
-    std_dev_t = torch.sqrt(sigma_clamped / (1.0 - sigma_clamped)) * noise_level
+    # At sigma == 1 the denominator is 0. FlowGRPO's reference sampler substitutes
+    # the schedule's *second* sigma there (`torch.where(sigma == 1, sigma_max,
+    # sigma)` with `sigma_max = self.sigmas[1]`), and sigma==1 only ever happens on
+    # step 0, where sigma_next IS sigmas[1] - so sigma_next reproduces their
+    # substitution exactly, using a value already passed in.
+    #
+    # This replaced a clamp to 0.9999, which was arrived at independently and is
+    # far harsher: on SD3.5's 10-step shift-3 schedule it gives 5.2915 at step 0
+    # against the reference's 3.7041, a 43% larger diffusion coefficient on the
+    # noisiest step. Steps 1-9 were already identical to the reference either way,
+    # so this was the single point of divergence in the sampler.
+    denom = 1.0 - torch.where(sigma >= 1.0, sigma_next, sigma)
+    std_dev_t = torch.sqrt(sigma / denom.clamp(min=1e-8)) * noise_level
 
+    # The cap stays as a guard for schedules where the above is still unbounded
+    # (sigma_next -> 1). It does not bind on SD3.5 or FLUX: at step 0 above it
+    # would allow 0.5 and the actual value uses 0.245 of that budget.
     dt = sigma_next - sigma
     max_std_sq = sigma.clamp(min=1e-8) / (-dt).clamp(min=1e-12)
     return torch.minimum(std_dev_t, torch.sqrt(max_std_sq))
