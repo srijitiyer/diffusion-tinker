@@ -70,7 +70,7 @@ The fix was mostly obvious once the problem was. Eval takes a held-out prompt li
 
 \section{Reward difficulty, measured instead of guessed}
 
-The old OCR prompts were three-letter words. Calibrating against the base model at a fixed seed:
+The old OCR prompts were all three-letter words. I calibrated each difficulty tier against the base model at a fixed seed to see what we were actually asking for:
 
 \begin{center}
 \small
@@ -87,7 +87,9 @@ two words  & 0.569 & 0.443 \\
 \end{tabular}
 \end{center}
 
-The reward is length-normalised edit distance, so one wrong character costs $1/3$ on ``CAT'' but $1/6$ on ``BAKERY'', so longer targets score \emph{higher}. No tier is saturated, so the earlier report of OCR base $=1.00$ is not reproducible under a fixed-seed measurement. Train and eval splits are now disjoint in both prompts and target strings.
+The reward is length-normalised edit distance. This means one wrong character costs $1/3$ on ``CAT'' but only $1/6$ on ``BAKERY'', so longer targets actually score \emph{higher}, which is the opposite of what I expected when I picked them.
+
+None of the tiers is saturated. In addition, the earlier report gave an OCR base of $1.00$, and I cannot reproduce that under a fixed-seed measurement at any tier. The train and eval splits are now disjoint in both the prompts and the target strings.
 
 \section{Results on fixed code}
 \label{sec:results}
@@ -125,23 +127,27 @@ It climbs and then holds: $0.893$, $0.892$, $0.873$, $0.851$ at epochs 4 through
 
 \section{FlowGRPO($\beta{=}0$) and DDRL($\beta{=}0$) are the same thing}
 
-They are identical in source, not merely similar. The base advantage clamps the group-normalised reward to $\pm 5$, and DDRL's reduces to exactly that once \code{beta\_temp}$=1$ skips the divide and the monotonic transform is off. FlowGRPO's only extra term, \code{use\_grpo\_guard}, defaults off, and at $\beta=0$ both assemble the same clipped-PPO loss.
+These two are not just similar, they are the same code path. The base advantage clamps the group-normalised reward to $\pm 5$, and DDRL's version reduces to exactly that once \code{beta\_temp}$=1$ skips the divide and the monotonic transform is off. FlowGRPO's only extra term is \code{use\_grpo\_guard}, which defaults to off. So at $\beta=0$ both of them assemble the same clipped-PPO loss.
 
 Empirically, at epoch 0 from the same seed, both selected the same prompt subset in the same order and produced identical per-prompt rewards
 \[
 [0.08,\; 0.08,\; 0.00,\; 0.29,\; 0.17,\; 0.17,\; 0.08,\; 0.17],
 \]
-identical mean reward $0.1302$, identical mean advantage $0$, and identical ratio $0.9977$. Only the printed loss differs in the fourth decimal ($0.0005$ versus $0.0004$), which is bf16 GEMM nondeterminism between two processes. Curves diverge after the first update because RL amplifies that difference through its own feedback loop, so per-epoch equality past epoch 0 is not achievable across processes and is not the right thing to ask for.
+identical mean reward $0.1302$, identical mean advantage $0$, and identical ratio $0.9977$. The only thing that differs is the printed loss in the fourth decimal, $0.0005$ against $0.0004$, and that is bf16 GEMM nondeterminism between two processes.
+
+However, the curves do diverge after the first update. This happens because RL amplifies that tiny difference through its own feedback loop, so equality past epoch 0 is not something I can get across processes and is not the right thing to ask for.
 
 \section{DDPO was never DDPO}
 
-\code{DDPOTrainer} never overrode \code{\_compute\_advantages}, so it inherited the within-batch group-normalised tracker and was FlowGRPO with a different clip range. The claim in its own docstring, that it lacks group normalisation, was false, and backwards historically: \code{PerPromptStatTracker} comes from DDPO, and the real one keeps a rolling per-prompt reward history with a fallback to batch statistics.
+\code{DDPOTrainer} never overrode \code{\_compute\_advantages}. This means it inherited the within-batch group-normalised tracker, so what we were calling DDPO was really FlowGRPO with a different clip range.
 
-It now uses that. The signature is visible in the logs above: FlowGRPO and DDRL report mean advantage \emph{exactly} $0$, because group normalisation forces it, while DDPO reports $0.089$ then $0.101$, because it normalises against history instead. Two different estimators, and on this task DDPO climbs fastest. \textbf{Every earlier DDPO number should be read as a FlowGRPO number.}
+Its own docstring claimed it lacks group normalisation. That is false, and it is also backwards historically. \code{PerPromptStatTracker} comes from DDPO in the first place, and the real one keeps a rolling per-prompt reward history with a fallback to batch statistics.
+
+It uses the real one now, and you can see the difference in the logs above. FlowGRPO and DDRL report a mean advantage of \emph{exactly} $0$, because group normalisation forces that. DDPO reports $0.089$ and then $0.101$, because it normalises against history instead. These are two genuinely different estimators, and on this task DDPO is the one that climbs fastest. \textbf{Every earlier DDPO number should be read as a FlowGRPO number.}
 
 \section{DDRL's monotonic transform}
 
-$\lambda(A) = -e^{-A}$ is a legitimate monotonic, risk-averse reweighting, but its range is $(-\infty, 0)$, so applied to a zero-mean advantage every value comes out negative. In $-A\cdot\text{ratio}$ that discourages every sampled action, so the policy walks away from its own distribution, and the unbounded negative side makes it violent. That, not a weak anchor, is what the earlier report called ``DDRL collapses''.
+$\lambda(A) = -e^{-A}$ is a legitimate monotonic, risk-averse reweighting. However, its range is $(-\infty, 0)$, so when you apply it to a zero-mean advantage every single value comes out negative. In the $-A\cdot\text{ratio}$ term that discourages every action the model sampled, so the policy walks away from its own distribution. In addition, the negative side is unbounded, which is what makes it violent rather than just slow. That, not a weak anchor, is what the earlier report called ``DDRL collapses''.
 
 The theorem does not have this problem because it maximises over $p_\theta$ as a distribution, so $\int p_\theta = 1$ is carried by a multiplier and the stationary solution is still normalised. The PPO surrogate enforces no such constraint. Subtracting a per-group baseline restores the zero-mean advantage the surrogate needs and leaves the policy gradient unbiased, since $\mathbb{E}[(A-b)\nabla\log\pi] = \mathbb{E}[A\nabla\log\pi]$, while $\lambda$'s monotonicity preserves the ranking exactly.
 
@@ -160,19 +166,19 @@ The theorem does not have this problem because it maximises over $p_\theta$ as a
 
 \section{FLUX.1-dev}
 
-FLUX.1-dev runs end to end. Four epochs of FlowGRPO at 512px, LoRA rank 16 (26.1\,M trainable): reward $0.312 \to 0.806$, importance ratio $0.9992 \to 0.9998$, peak memory $36.5$\,GB, exit 0. So the 12\,B model plus a LoRA training step fits with roughly $11.5$\,GB of headroom.
+FLUX.1-dev runs end to end now. Four epochs of FlowGRPO at 512px with LoRA rank 16, which is $26.1$\,M trainable parameters, gives reward $0.312 \to 0.806$ and an importance ratio of $0.9992 \to 0.9998$. Peak memory was $36.5$\,GB and it exited cleanly. So the $12$\,B model plus a LoRA training step fits with about $11.5$\,GB to spare.
 
 DDRL with a data anchor also runs there, which matters because that is a different code path: the flow-matching loss needs packed latents, rotary position ids, a guidance scalar and $\text{timestep}=\sigma$ rather than SD3's $\sigma\times1000$. Measured over its first epochs: \code{data\_loss} steady near $0.42$, ratio $0.9993 \to 0.9999$, mean advantage exactly $0$.
 
-The ratio is the load-bearing number in both. FLUX builds its schedule differently from SD3 (dynamic shifting, which is what the missing \code{mu} crashed on), so $0.999$ there says the $\sigma=1$ cap is a property of the SDE rather than a patch fitted to one schedule.
+I think the ratio is the important number in both of these. FLUX builds its schedule differently from SD3, using dynamic shifting, which is the thing the missing \code{mu} was crashing on. So getting $0.999$ on FLUX as well tells me the $\sigma=1$ cap is a property of the SDE itself, and not a patch I fitted to one particular schedule.
 
-One result worth stating plainly: FLUX's untrained OCR is $0.792$ where SD3.5's is $0.300$. FLUX is already good at rendering text, so the task has almost no headroom left, and its held-out curve is flat ($0.792 \to 0.787$) while its training reward climbs $0.167 \to 0.800$. That is the headroom argument applying across models rather than across rewards, and it means OCR is the wrong task on which to demonstrate anything on FLUX even though it is the right one on SD3.5.
+One result here is worth stating plainly. FLUX's untrained OCR is $0.792$, where SD3.5's is $0.300$. FLUX is already good at rendering text, so there is almost no headroom left on this task. Its held-out curve stays flat at $0.792 \to 0.787$ while its training reward climbs from $0.167$ to $0.800$. That is the headroom argument applying across models rather than across rewards, and it means OCR is the wrong task on which to demonstrate anything on FLUX even though it is the right one on SD3.5.
 
 \section{Other trainers}
 
-\textbf{DRaFT} had never been measured on held-out data. It overrides \code{train()} and so never called \code{\_evaluate}, meaning its long-standing $5.9 \to 9.6$ was the training reward on the prompts it directly optimises. With a held-out set it gives $5.440 \to 5.768$ across 13 evals. It also could not run at all until two memory defects were fixed: eval was leaving the text encoders on the GPU, undoing the offload DRaFT performs specifically to make room for the reward backward, and prompt pre-encoding pushed every prompt through T5 in one call. Peak memory went from OOM at $23.19$\,GB to $17.7$\,GB.
+\textbf{DRaFT} had never once been measured on held-out data. It overrides \code{train()}, so it never called \code{\_evaluate} at all. That means the $5.9 \to 9.6$ we had been quoting for months was the training reward, measured on the exact prompts it optimises. With a held-out set it gives $5.440 \to 5.768$ across 13 evals. It also could not run at all until two memory defects were fixed: eval was leaving the text encoders on the GPU, undoing the offload DRaFT performs specifically to make room for the reward backward, and prompt pre-encoding pushed every prompt through T5 in one call. Peak memory went from OOM at $23.19$\,GB to $17.7$\,GB.
 
-\textbf{SFT} converges and then overfits. Held-out flow-matching loss on 16 unseen examples at fixed noise and timesteps: $0.21184 \to 0.19742$ at its minimum, then back up to $0.20035$. The training loss falls the whole way, so the turnover is invisible without a held-out set, and it is an argument for the \code{early\_stop\_patience} the config already supports. That measurement came from a callback defined in a cluster run script, so it existed for that one run and for nobody calling \code{SFTTrainer} directly; it is now inside the trainer, and a fresh run reproduces the shape ($0.26583 \to 0.25219$, flat from step 150).
+\textbf{SFT} converges and then overfits. On 16 unseen examples at fixed noise and timesteps, the held-out flow-matching loss goes $0.21184$ down to $0.19742$ at its minimum, and then back up to $0.20035$. The training loss falls the entire way, so the turnover is completely invisible unless you have a held-out set, and it is an argument for the \code{early\_stop\_patience} the config already supports. That measurement came from a callback defined in a cluster run script, so it existed for that one run and for nobody calling \code{SFTTrainer} directly; it is now inside the trainer, and a fresh run reproduces the shape ($0.26583 \to 0.25219$, flat from step 150).
 
 \textbf{DiffusionDPO} was recorded as blocked on Pick-a-Pic being gated. That was wrong: both versions 404 now, so accepting the terms would not have helped, and an ungated mirror carries the same schema. What actually blocked it was two defects, a missing $0.5$ in the loss that made the paper's $\beta=5000$ behave like $10000$, and a loader that assumed decoded images where the dataset stores raw jpeg bytes. Over 2000 steps it separates the pair, but one-sidedly: the loser's loss rises in 34/40 logged steps and the implicit reward is positive in 27/40, while the winner's loss falls in only 15/40, which is below chance.
 
@@ -180,7 +186,7 @@ It also had no held-out metric of any kind, only its own training loss, the same
 
 \section{Anchor strength: what a sweep can and cannot show}
 
-Haotian asked for $\beta = 0$, $0.01$ and upward. An earlier grid did sweep both regularizer weights, so the sweep existed, but it passed no held-out prompts and no eval seed, so it scored the first four \emph{training} prompts, and it ran on counting 2--4 objects where the base model is at $0.792$ and every arm saturates at $1.000$. A sweep whose arms all reach the ceiling measures the ceiling.
+Haotian asked for $\beta = 0$, $0.01$ and upward. An earlier grid did sweep both regularizer weights, so the sweep did exist. However, it passed no held-out prompts and no eval seed, so it was scoring the first four \emph{training} prompts. In addition, it ran on counting 2--4 objects, where the base model already sits at $0.792$ and every arm saturates at $1.000$. A sweep whose arms all reach the ceiling measures the ceiling.
 
 So I redid it on counting 6--9 objects, which is the one task I found with real headroom, matching everything except the regularizer weight. Two things fell out before any curve was long enough to read. All four arms reported an epoch-0 held-out reward of $0.541 \pm 0.071$ ($n{=}24$), identical to three decimals across four independent processes, which is the eval-determinism claim tested rather than asserted. And both regularizer terms demonstrably fire: \code{kl\_loss} $0.0009$ on the FlowGRPO reverse-KL arm, \code{data\_loss} $0.0000$ at $\beta{=}0$ against $0.2775$ at $\beta{=}0.3$, with the reported total reconciling exactly as $\text{rl} + \beta \cdot \text{data}$.
 
@@ -228,7 +234,9 @@ This is a negative result about the experiment as much as about $\beta$. It does
 
 The comparison above ran to six epochs, which is early for the thing a data anchor is for. Its job is to keep the policy near the data manifold over long training, so a null at six epochs says little about it. Reaching twelve required fixing the reason nothing here ever ran that long: a segfault discarded all training and the run restarted from zero, so no experiment could outlast the mean time between crashes. With adapter, optimiser moments, epoch, advantage history and RNG state checkpointed every epoch, 73 crashes that previously produced about 70 curve resets became 5 crashes producing none.
 
-The follow-up was pre-registered before the runs existed, with two statistics: \code{drift}, the late-third mean minus the early-third mean, and \code{giveback}, peak minus final. The second exists because testing the first against synthetic curves of known shape showed it returns exactly zero for a run that climbs and surrenders the whole gain, which is the SFT give-back shape and precisely the failure the anchor should prevent. The registered statistic was blind to its own target.
+I pre-registered the follow-up before the runs existed, using two statistics. The first is \code{drift}, which is the late-third mean minus the early-third mean. The second is \code{giveback}, which is peak minus final.
+
+The reason there are two is that I tested \code{drift} against synthetic curves of known shape first, and it returns exactly zero for a run that climbs and surrenders the whole gain, which is the SFT give-back shape and precisely the failure the anchor should prevent. The registered statistic was blind to its own target.
 
 Read once at the declared point, four seeds at $\beta{=}0$ against three at $\beta{=}0.3$, over a common twelve-epoch window:
 
@@ -284,14 +292,14 @@ Exact-match OCR on FLUX collapsed from an untrained $0.625$ to $0.29$ across thr
 
 The single log line was not diagnostic. \code{rl\_loss} prints \code{0.0000} in $92.3\%$ of epochs in the arm that held and $92.9\%$ in the arm that collapsed; four decimals means $<0.00005$ rather than zero; and \code{rl\_loss} tracks the \emph{mean} advantage rather than its spread, which group normalisation drives to zero either way.
 
-\textbf{Superseded, and re-measured.} Everything in this section up to here was produced before three defects were found and fixed: the FLUX sampler never passed FLUX's own sigma grid, \code{ocr\_exact} was substring containment rather than equality, and the data term was unconditional where DDRL specifies the anchor image's caption with $0.2$ dropout. The reasoning stands, the numbers do not. Nine runs of twenty epochs each were repeated on corrected code, all starting from an identical untrained $0.583$:
+\textbf{Superseded, and re-measured.} Everything in this section up to this point was measured before I found and fixed three more defects: the FLUX sampler never passed FLUX's own sigma grid, \code{ocr\_exact} was substring containment rather than equality, and the data term was unconditional where DDRL specifies the anchor image's caption with $0.2$ dropout. The reasoning stands, the numbers do not. Nine runs of twenty epochs each were repeated on corrected code, all starting from an identical untrained $0.583$:
 
 \begin{center}
 \begin{tabular}{lrrr}
 \toprule
 \code{data\_beta} & held-out & between-seed SD & vs.\ no anchor \\
 \midrule
-$0$ & $0.5197$ & $0.0380$ &, \\
+$0$ & $0.5197$ & $0.0380$ & (baseline) \\
 $0.01$ & $0.4072$ & $0.0257$ & $-0.113$, $4.2$\,SE, $0/9$ \\
 $0.05$ & $0.3099$ & $0.0285$ & $-0.210$, $7.6$\,SE, $0/9$ \\
 \bottomrule
@@ -372,9 +380,13 @@ This reconciles with the counting null instead of contradicting it. Counting is 
 
 \section{FLUX has headroom on one task and still does not climb}
 
-The headroom argument has carried a lot of weight in this report: FLUX's flat curves were explained by its starting near the ceiling of every reward tried, $0.792$ on OCR, $0.667$ on counting 2--5 objects, $0.625$ on exact-match OCR. That explanation makes a prediction. On a task where FLUX has room, it should climb.
+The headroom argument has been doing a lot of work in this report. I explained FLUX's flat curves by saying it starts near the ceiling of every reward we tried: $0.792$ on OCR, $0.667$ on counting 2--5 objects, $0.625$ on exact-match OCR.
 
-Counting 6--9 objects is that task: untrained $0.507$. Three seeds, DDRL with the anchor at \code{data\_beta}$=0.05$, 512px, group 6, 28 steps, 13--16 epochs each. The runs were only possible because a crash no longer discards training, every earlier attempt at this configuration died at one epoch.
+That explanation makes a prediction, which is useful. If it is right, then on a task where FLUX actually has room, it should climb.
+
+Counting 6--9 objects is that task, with an untrained score of $0.507$. I ran three seeds of DDRL with the anchor at \code{data\_beta}$=0.05$, at 512px, group 6, 28 steps, for 13--16 epochs each.
+
+These runs were only possible because a crash no longer throws away the training. Every earlier attempt at this configuration died at one epoch.
 
 \begin{center}
 \begin{tabular}{lccc}
@@ -389,7 +401,9 @@ $K{=}12$ & $0.4865$ & $-0.0205$ & $2.4$\,SE \\
 \end{tabular}
 \end{center}
 
-\noindent It does not climb. It settles about $0.015$--$0.020$ below where it started and stays there; final points are $0.479$, $0.474$ and $0.447$ against a $0.507$ baseline. The within-run trend is inconsistent across seeds ($+0.007$, $-0.053$, $+0.022$), so this is not progressive degradation, the model moves below its starting score early and remains there.
+\noindent It does not climb. It settles about $0.015$ to $0.020$ below where it started and stays there. The final points are $0.479$, $0.474$ and $0.447$ against a baseline of $0.507$.
+
+The within-run trend is inconsistent across seeds, at $+0.007$, $-0.053$ and $+0.022$. So I do not think this is progressive degradation. The model moves below its starting score early and remains there.
 
 The standard error halves across those windows while the difference grows by about half, so most of the rising sigma count is precision rather than a moving quantity. That is worth distinguishing from the drift result in the previous section, where the difference itself swung by a factor of ten between windows and reversed the verdict. Here the sign and the conclusion hold at every cut.
 
@@ -422,7 +436,9 @@ So four plausible causes are ruled out rather than one confirmed. What remains u
 
 \section{Still open}
 
-The counting, CLIP-score, PickScore and HPS rewards all need re-measuring on fixed code, since their previous numbers came from rollouts that carried no signal. Two deliberate deviations are worth remembering: the log-prob is mean-reduced rather than summed, which is what makes \code{clip\_range}$=10^{-3}$ sane, and the counting reward is graded where GenEval's is binary, so those numbers are not directly comparable.
+The counting, CLIP-score, PickScore and HPS rewards all still need re-measuring on fixed code, because their previous numbers came from rollouts that carried no signal at all.
+
+There are also two deliberate deviations that are worth remembering. The log-prob is mean-reduced rather than summed, which is the reason \code{clip\_range}$=10^{-3}$ is a sane value. In addition, the counting reward is graded where GenEval's is binary, so those numbers are not directly comparable.
 
 \vspace{0.5em}
 \noindent Code, tests, and the full audit: \url{https://github.com/srijitiyer/diffusion-tinker}.
