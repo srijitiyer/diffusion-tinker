@@ -117,6 +117,36 @@ class DDRLTrainer(BaseDiffusionTrainer):
                 )
             self._data_captions = [ds[i][cap_col] for i in range(max_images)]
             print(f"  Cached {len(self._data_captions)} anchor captions")
+
+        # Index anchors by the prompt they were generated from, so the data term
+        # can use p_data(.|c) for the c actually being rolled out (Algorithm 1
+        # line 2) instead of an unrelated draw from the pool.
+        self._data_by_prompt = None
+        if getattr(self.config, "anchor_matches_prompt", False):
+            if self._data_captions is None:
+                raise ValueError(
+                    "anchor_matches_prompt=True needs caption_column set: the "
+                    "anchor images have to be matchable to the prompt they were "
+                    "generated from."
+                )
+            by_prompt: dict[str, list[int]] = {}
+            for i, cap in enumerate(self._data_captions):
+                by_prompt.setdefault(cap, []).append(i)
+            self._data_by_prompt = by_prompt
+
+            missing = [p for p in self.train_prompts if p not in by_prompt]
+            if missing:
+                # Silently falling back to a random anchor for the unmatched
+                # prompts would make the run a blend of two different objectives
+                # with no record of the mix.
+                raise ValueError(
+                    f"{len(missing)} of {len(self.train_prompts)} training prompts "
+                    f"have no anchor image (e.g. {missing[0]!r}). Generate anchors "
+                    "for every training prompt, or set anchor_matches_prompt=False."
+                )
+            print(f"  Anchors indexed by prompt: {len(by_prompt)} prompts, "
+                  f"{min(len(v) for v in by_prompt.values())}-"
+                  f"{max(len(v) for v in by_prompt.values())} images each")
         print(f"  Cached {len(self._data_latents)} latents ({self._data_latents.nbytes / 1e6:.0f} MB)")
 
         # Cache a real unconditional embedding for the anchor term.
@@ -315,7 +345,19 @@ class DDRLTrainer(BaseDiffusionTrainer):
                         "anchor term needs the cached unconditional embedding; "
                         "_setup_data did not run"
                     )
-                    data_idx = torch.randint(0, len(self._data_latents), (mb_batch_size,))
+                    if getattr(self, "_data_by_prompt", None) is not None:
+                        # Algorithm 1 line 2: the anchor is a base-model sample of
+                        # the prompt being rolled out, not an unrelated image.
+                        data_idx = torch.tensor(
+                            [
+                                self._data_by_prompt[p][
+                                    int(torch.randint(len(self._data_by_prompt[p]), (1,)))
+                                ]
+                                for p in mb.prompts
+                            ]
+                        )
+                    else:
+                        data_idx = torch.randint(0, len(self._data_latents), (mb_batch_size,))
                     clean_latents = self._data_latents[data_idx].to(device, dtype=autocast_dtype)
 
                     noise = torch.randn_like(clean_latents)
@@ -336,7 +378,17 @@ class DDRLTrainer(BaseDiffusionTrainer):
                     # unconditional, as before.
                     anchor_embeds, anchor_pooled = uncond_embeds, uncond_pooled
                     drop_mask = None
-                    if self._data_captions is not None:
+                    if getattr(self, "_data_by_prompt", None) is not None:
+                        # c is the rollout prompt, already encoded on the batch, so
+                        # the data term conditions on exactly the same embedding the
+                        # RL term does - no re-encoding and no text encoders needed.
+                        anchor_embeds = mb.prompt_embeds.to(device, dtype=autocast_dtype)
+                        anchor_pooled = mb.pooled_embeds.to(device, dtype=autocast_dtype)
+                        drop_mask = (
+                            torch.rand(mb_batch_size, device=device)
+                            < config.condition_dropout
+                        )
+                    elif self._data_captions is not None:
                         caps = [self._data_captions[int(i)] for i in data_idx]
                         with torch.no_grad():
                             if config.offload_text_encoders:

@@ -62,3 +62,27 @@ class DDRLConfig(BaseDiffusionConfig):
     # Probability of dropping the caption, per DDRL_THEORY.md step 3b. Ignored
     # when caption_column is None (everything is already unconditional).
     condition_dropout: float = 0.2
+
+    # Draw the anchor image from the *rollout's own prompt* and condition the
+    # diffusion loss on that same prompt, which is what Algorithm 1 does:
+    #
+    #   2: Sample c, sample x0_tilde ~ p_data(.|c)
+    #   6: L = || eps_theta(x_t_tilde, t, c) - eps || - A * log p_theta(x_t|x_t+1, c)
+    #
+    # One c per iteration, used for the rollout, the reward, *and* the diffusion
+    # loss. The appendix says the anchors are base-model samples of the OCR
+    # prompts - "despite they are not accurate in text rendering, they provide
+    # abundant information of background details".
+    #
+    # Off (the previous and still-default behaviour) draws an anchor at random
+    # from the pool with no relation to the prompt being rolled out, and
+    # conditions on that image's own caption. Those are different objectives.
+    # Forward KL to p_data(x|c) regularizes the policy toward what the base model
+    # does *for this prompt*, so it can preserve style and background while the
+    # reward moves text. An unrelated anchor instead adds a gradient toward some
+    # other conditional entirely, which competes with the reward rather than
+    # constraining it, and gets stronger as data_beta grows.
+    #
+    # Requires a caption_column whose values are the training prompts, so the
+    # images can be matched back to the prompt they were generated from.
+    anchor_matches_prompt: bool = False

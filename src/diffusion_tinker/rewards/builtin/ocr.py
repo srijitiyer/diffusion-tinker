@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 
 import numpy as np
@@ -71,30 +72,47 @@ class OCRReward(BaseReward):
         # small next to the transformer, so co-residency is not the problem.
         use_gpu = "cuda" in str(self.device)
 
-        # Try EasyOCR first (works with PyTorch, no conflicts)
-        try:
-            import easyocr
+        # Which recognizer is a measurement-defining choice, not an implementation
+        # detail: the two engines read different amounts of text off the same
+        # image, and this reward gives a perfect score whenever the target appears
+        # anywhere in what was read, so a chattier engine scores higher. Measured
+        # on SD3.5-Medium at 512px/40-step ODE/CFG 4.5, EasyOCR puts the untrained
+        # baseline at 0.771 where the DDRL paper reports 0.566. FlowGRPO - whose
+        # numbers the paper is aligned with - uses PaddleOCR, so set
+        # DT_OCR_BACKEND=paddle for anything compared against published results.
+        # "auto" (default) keeps the previous preference order.
+        want = os.environ.get("DT_OCR_BACKEND", "auto").lower()
 
-            self._reader = easyocr.Reader(["en"], gpu=use_gpu, verbose=False)
-            self._backend = "easyocr"
-            return
-        except ImportError:
-            pass
-
-        # Fall back to PaddleOCR
-        try:
-            from paddleocr import PaddleOCR
-
+        if want in ("auto", "easyocr"):
             try:
-                self._reader = PaddleOCR(use_angle_cls=False, lang="en", use_gpu=False, show_log=False)
-            except (TypeError, ValueError):
-                self._reader = PaddleOCR(lang="en")
-            self._backend = "paddleocr"
-            return
-        except ImportError:
-            pass
+                import easyocr
 
-        raise ImportError("OCR reward requires easyocr or paddleocr. Install with: pip install easyocr")
+                self._reader = easyocr.Reader(["en"], gpu=use_gpu, verbose=False)
+                self._backend = "easyocr"
+                return
+            except ImportError:
+                if want == "easyocr":
+                    raise
+
+        if want in ("auto", "paddle", "paddleocr"):
+            try:
+                from paddleocr import PaddleOCR
+
+                try:
+                    self._reader = PaddleOCR(use_angle_cls=False, lang="en",
+                                             use_gpu=use_gpu, show_log=False)
+                except (TypeError, ValueError):
+                    self._reader = PaddleOCR(lang="en")
+                self._backend = "paddleocr"
+                return
+            except ImportError:
+                if want in ("paddle", "paddleocr"):
+                    raise
+
+        raise ImportError(
+            f"OCR reward found no backend for DT_OCR_BACKEND={want!r}. "
+            "Install easyocr or paddleocr."
+        )
 
     def _ocr_image(self, image) -> str:
         """Run OCR and return concatenated recognized text."""
@@ -104,13 +122,16 @@ class OCRReward(BaseReward):
             results = self._reader.readtext(img_array, detail=0)
             return "".join(results)
 
-        # PaddleOCR
+        # PaddleOCR. Matches flow_grpo/ocr.py line for line, including the
+        # confidence gate: `res[1][0] if res[1][1] > 0 else ''`. Ours dropped the
+        # confidence check, which is nearly always satisfied but not always, and
+        # this reward is meant to be comparable to theirs.
         results = self._reader.ocr(img_array, cls=False)
         recognized = ""
         if results and results[0]:
-            for line in results[0]:
-                if line and len(line) >= 2 and line[1]:
-                    recognized += line[1][0]
+            for res in results[0]:
+                if res and len(res) >= 2 and res[1] and res[1][1] > 0:
+                    recognized += res[1][0]
         return recognized
 
     def _score_single(self, image, target: str) -> float:

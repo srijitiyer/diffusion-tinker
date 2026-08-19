@@ -1628,3 +1628,102 @@ def test_matched_timestep_anchors_on_the_step_being_optimized():
     assert len(set(round(float(g[0]), 6) for g in seen_sigmas)) > 1, (
         "every step anchored at the same sigma; matched mode is not following j"
     )
+
+
+def test_prompt_matched_anchor_uses_that_prompts_image_and_embedding():
+    """Algorithm 1 draws the anchor from p_data(.|c) for the c being rolled out.
+
+    Line 2 samples one c and then x0~p_data(.|c); line 6 conditions the diffusion
+    loss on that same c. The appendix confirms the anchors are base-model samples
+    of the OCR prompts themselves ("despite they are not accurate in text
+    rendering, they provide abundant information of background details").
+
+    Ours drew a random image from a pool of unrelated photographs and conditioned
+    on that image's own caption, which is forward KL to a different conditional
+    entirely - a gradient competing with the reward rather than constraining it,
+    and one that grows with data_beta. This pins both halves: the latent must come
+    from the rollout prompt's own anchors, and the conditioning must be the
+    rollout prompt's embedding.
+    """
+    from types import SimpleNamespace
+
+    import diffusion_tinker.trainers.ddrl_trainer as ddrl_mod
+    from diffusion_tinker.trainers.ddrl_trainer import DDRLTrainer
+
+    B, T, C, H, W = 2, 3, 4, 8, 8
+    sigmas = torch.linspace(0.9, 0.1, T + 1)
+    prompt_embeds = torch.randn(B, 4, 8)
+
+    traj = TrajectoryBatch(
+        latents=torch.randn(B, T, C, H, W),
+        next_latents=torch.randn(B, T, C, H, W),
+        log_probs=torch.randn(B, T),
+        timesteps=sigmas,
+        prompt_embeds=prompt_embeds,
+        pooled_embeds=torch.randn(B, 8),
+        prompts=["sign saying CAT", "sign saying DOG"],
+        rewards=torch.tensor([1.0, 0.0]),
+        images=[Image.new("RGB", (8, 8))] * B,
+    )
+    traj.advantages = torch.tensor([1.0, -1.0])
+
+    # anchors 0,1 belong to CAT; anchors 2,3 to DOG. Make them separable by value.
+    data_latents = torch.stack([
+        torch.full((C, H, W), 10.0), torch.full((C, H, W), 11.0),
+        torch.full((C, H, W), 20.0), torch.full((C, H, W), 21.0),
+    ])
+
+    seen = []
+
+    def fake_flow_loss(**kw):
+        seen.append((kw["latents"].detach().clone(), kw["prompt_embeds"].detach().clone()))
+        return torch.zeros((), requires_grad=True)
+
+    stub = SimpleNamespace(
+        device=torch.device("cpu"),
+        config=DDRLConfig(
+            data_beta=0.5, timestep_sampling="matched", anchor_matches_prompt=True,
+            train_batch_size=None, mixed_precision="bf16", timestep_fraction=1.0,
+            timestep_stride=1, condition_dropout=0.0, clip_range=1e-3,
+            adv_clip_max=5.0, noise_level=0.7, guidance_scale=4.5, max_grad_norm=1.0,
+        ),
+        transformer=torch.nn.Linear(4, 4),
+        optimizer=SimpleNamespace(zero_grad=lambda: None, step=lambda: None),
+        _model_type="sd3",
+        _data_latents=data_latents,
+        _data_captions=["sign saying CAT", "sign saying CAT",
+                        "sign saying DOG", "sign saying DOG"],
+        _data_by_prompt={"sign saying CAT": [0, 1], "sign saying DOG": [2, 3]},
+        _uncond_embeds=torch.randn(1, 4, 8),
+        _uncond_pooled=torch.randn(1, 8),
+        _replay_step=lambda **kw: (torch.zeros(len(kw["latent_t"]), requires_grad=True), None),
+    )
+
+    real = ddrl_mod.compute_flow_matching_loss
+    ddrl_mod.compute_flow_matching_loss = fake_flow_loss
+    try:
+        DDRLTrainer._training_step(stub, traj)
+    finally:
+        ddrl_mod.compute_flow_matching_loss = real
+
+    assert seen, "anchor term never ran"
+    # _training_step shuffles the batch, so row order is not the trajectory order.
+    # What must hold is the pairing: whichever prompt a row carries, its anchor
+    # has to come from that prompt's own images. Identify the row by matching its
+    # conditioning embedding back to the trajectory it came from.
+    bucket = {0: (10.0, 11.0), 1: (20.0, 21.0)}
+    for latents, embeds in seen:
+        for row in range(embeds.shape[0]):
+            match = [
+                i for i in range(B)
+                if torch.allclose(embeds[row].float(), prompt_embeds[i].float(), atol=1e-2)
+            ]
+            assert len(match) == 1, (
+                "the data term must condition on one of the rollout prompt "
+                f"embeddings; row {row} matched {len(match)} of them"
+            )
+            got = float(latents[row].flatten()[0])
+            assert got in bucket[match[0]], (
+                f"row conditioned on prompt {match[0]} was anchored on {got}, "
+                f"which belongs to the other prompt - the shuffle broke alignment"
+            )
