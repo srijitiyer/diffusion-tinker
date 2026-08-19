@@ -52,6 +52,14 @@ class BaseDiffusionConfig:
     # different optimization, not a different batching.
     grad_accumulate: bool = False
 
+    # Exponential moving average of the LoRA weights, evaluated instead of the
+    # live ones. FlowGRPO's SD3.5 OCR config sets train.ema = True and the DDRL
+    # paper follows FlowGRPO's settings, so results without it are not comparable
+    # to the published table. Defaults match flow_grpo/ema.py.
+    use_ema: bool = False
+    ema_decay: float = 0.9
+    ema_update_interval: int = 8
+
     # When train_prompts is a large pool, sample this many prompts per epoch
     # (a fresh random subset each epoch) instead of rolling out every prompt.
     # Lets you train on a big, diverse prompt set - which gives the reward room

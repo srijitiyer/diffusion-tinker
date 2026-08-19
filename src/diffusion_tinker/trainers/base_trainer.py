@@ -39,6 +39,9 @@ class BaseDiffusionTrainer(ABC):
         self.config = config
         self.train_prompts = train_prompts or []
         self.global_step = 0
+        # Built lazily in train(), after LoRA is attached - the shadow copy has to
+        # be of the trainable adapter parameters, which do not exist at __init__.
+        self._ema = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.reward_kwargs = reward_kwargs or {}
         self.callbacks = callbacks or []
@@ -276,6 +279,17 @@ class BaseDiffusionTrainer(ABC):
         """Main training loop."""
         os.makedirs(self.config.output_dir, exist_ok=True)
 
+        if getattr(self.config, "use_ema", False) and self._ema is None:
+            from diffusion_tinker.core.ema import ParameterEMA
+
+            self._ema = ParameterEMA(
+                self.transformer.parameters(),
+                decay=self.config.ema_decay,
+                update_step_interval=self.config.ema_update_interval,
+            )
+            print(f"EMA on: decay={self.config.ema_decay}, "
+                  f"every {self.config.ema_update_interval} steps; eval uses the average")
+
         if not self.train_prompts:
             raise ValueError("No training prompts provided. Pass train_prompts to the trainer.")
 
@@ -327,6 +341,9 @@ class BaseDiffusionTrainer(ABC):
             self.transformer.train()
             metrics = self._training_step(trajectory)
             self.global_step += 1
+
+            if self._ema is not None:
+                self._ema.step(self.transformer.parameters(), self.global_step)
 
             if epoch % self.config.log_every == 0:
                 mean_reward = trajectory.rewards.mean().item()
@@ -421,6 +438,8 @@ class BaseDiffusionTrainer(ABC):
             f"tsamp={getattr(c, 'timestep_sampling', None)}",
             f"evalsteps={c.num_eval_inference_steps}",
             f"evalguid={c.eval_guidance_scale}",
+            f"ema={getattr(c, 'use_ema', None)}/{getattr(c, 'ema_decay', None)}",
+            f"gacc={getattr(c, 'grad_accumulate', None)}",
             # The objective itself. Swapping the reward on the same tag was the
             # worst case: the new reward's curve reported on top of the old
             # reward's optimised adapter, with nothing to catch it.
@@ -491,6 +510,10 @@ class BaseDiffusionTrainer(ABC):
                 "best_eval_reward": self._best_eval_reward,
                 "evals_without_improvement": self._evals_without_improvement,
                 "stat_tracker": self._tracker_state(),
+                # Without the shadow, a resumed run restarts the average from the
+                # resumed weights, which reads as a step in the eval curve exactly
+                # where the crash was.
+                "ema": self._ema.state_dict() if self._ema is not None else None,
                 "fingerprint": self._state_fingerprint(),
                 # RNG too. Without it a resumed run draws different rollout noise
                 # and prompt subsets than an uninterrupted one, which is fine only
@@ -540,6 +563,17 @@ class BaseDiffusionTrainer(ABC):
         set_peft_model_state_dict(self.transformer, state["adapter"])
         self.optimizer.load_state_dict(state["optimizer"])
         self.global_step = state.get("global_step", 0)
+        ema_state = state.get("ema")
+        if ema_state is not None:
+            if self._ema is None:
+                from diffusion_tinker.core.ema import ParameterEMA
+
+                self._ema = ParameterEMA(
+                    self.transformer.parameters(),
+                    decay=self.config.ema_decay,
+                    update_step_interval=self.config.ema_update_interval,
+                )
+            self._ema.load_state_dict(ema_state)
         self._best_eval_reward = state.get("best_eval_reward", -float("inf"))
         self._evals_without_improvement = state.get("evals_without_improvement", 0)
         self._restore_tracker_state(state.get("stat_tracker"))
@@ -657,6 +691,12 @@ class BaseDiffusionTrainer(ABC):
         # chunks rather than one call that would OOM on the VAE decode.
         chunk = self.config.train_batch_size or len(eval_prompts)
         eval_images = []
+        # FlowGRPO evaluates the averaged weights, not the live ones
+        # (scripts/train_sd3.py copies the EMA in around eval and back out after).
+        # A 64-trajectory rollout moves the live weights enough between epochs
+        # that the curve otherwise reports where the wander landed.
+        if self._ema is not None:
+            self._ema.swap_in(self.transformer.parameters())
         try:
             for i in range(0, len(eval_prompts), chunk):
                 out = sample_fn(
@@ -681,6 +721,8 @@ class BaseDiffusionTrainer(ABC):
             # breaks first: it offloads them on purpose after caching embeddings,
             # precisely to free room for the reward backward, and a single eval
             # silently undid that and OOMed the next step.
+            if self._ema is not None:
+                self._ema.swap_out(self.transformer.parameters())
             if self.config.offload_text_encoders:
                 self._set_text_encoders_device("cpu")
                 if torch.cuda.is_available():

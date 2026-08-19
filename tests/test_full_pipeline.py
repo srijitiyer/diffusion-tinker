@@ -390,6 +390,10 @@ def _bind_trainer_helpers(stub):
         stub.reward_fn = SimpleNamespace(name="stub_reward")
     if not hasattr(stub, "train_prompts"):
         stub.train_prompts = ["a cat"]
+    # EMA is off by default; save/load still read the attribute, and binding it
+    # here rather than at each stub is the point of this helper.
+    if not hasattr(stub, "_ema"):
+        stub._ema = None
 
     stub._state_path = lambda: BaseDiffusionTrainer._state_path(stub)
     stub._state_fingerprint = lambda: BaseDiffusionTrainer._state_fingerprint(stub)
@@ -1800,3 +1804,79 @@ def test_grad_accumulate_gives_one_optimizer_step_per_epoch():
     assert calls["step"] == n_chunks, (
         f"default is minibatch SGD: expected {n_chunks} steps, got {calls['step']}"
     )
+
+
+def test_ema_averages_weights_and_eval_uses_them():
+    """EMA must track the weights and be what eval sees, then be swapped back out.
+
+    FlowGRPO's SD3.5 OCR config sets train.ema = True and its trainer copies the
+    average in around eval and back out afterwards. The DDRL paper follows
+    FlowGRPO's settings, so a run evaluating live weights is measuring something
+    else. It matters most at the batch sizes reachable on one GPU: 64 trajectories
+    move the live weights enough between epochs that the curve reports where the
+    wander landed rather than where the policy is.
+
+    Swapping back out is the half that would silently corrupt a run: training on
+    from the average turns the optimizer's own state into a lagged copy of itself.
+    """
+    from diffusion_tinker.core.ema import ParameterEMA
+
+    model = torch.nn.Linear(4, 4, bias=False)
+    with torch.no_grad():
+        model.weight.fill_(0.0)
+
+    ema = ParameterEMA(model.parameters(), decay=0.9, update_step_interval=1)
+    assert torch.allclose(ema.shadow[0], torch.zeros(4, 4))
+
+    # move the live weights, then step the average toward them
+    with torch.no_grad():
+        model.weight.fill_(1.0)
+    ema.step(model.parameters(), step=0)
+
+    # warmup decay at step 0 is min(1/10, 0.9) = 0.1, so the average jumps 0.9
+    # of the way to the live weights, not 0.1
+    assert math.isclose(float(ema.shadow[0][0, 0]), 0.9, abs_tol=1e-6), (
+        f"expected warmup decay 0.1 -> shadow 0.9, got {float(ema.shadow[0][0, 0])}"
+    )
+
+    # eval swaps the average in ...
+    ema.swap_in(model.parameters())
+    assert math.isclose(float(model.weight[0, 0]), 0.9, abs_tol=1e-6), (
+        "eval must see the averaged weights"
+    )
+    # ... and back out, or training continues from the average
+    ema.swap_out(model.parameters())
+    assert math.isclose(float(model.weight[0, 0]), 1.0, abs_tol=1e-6), (
+        "the live weights must be restored after eval"
+    )
+
+    # and it survives a resume
+    ema2 = ParameterEMA(model.parameters(), decay=0.9, update_step_interval=1)
+    ema2.load_state_dict(ema.state_dict())
+    assert torch.allclose(ema2.shadow[0], ema.shadow[0])
+
+
+def test_ema_refuses_unbalanced_swaps():
+    """A missed swap_out would leave the model holding the average forever.
+
+    Two swap_ins in a row would also overwrite the stash with the average itself,
+    so the live weights could never be recovered. Both are silent corruptions of
+    every subsequent epoch, so they raise.
+    """
+    from diffusion_tinker.core.ema import ParameterEMA
+
+    model = torch.nn.Linear(2, 2, bias=False)
+    ema = ParameterEMA(model.parameters(), decay=0.9)
+
+    try:
+        ema.swap_out(model.parameters())
+        raise AssertionError("swap_out without swap_in should raise")
+    except RuntimeError:
+        pass
+
+    ema.swap_in(model.parameters())
+    try:
+        ema.swap_in(model.parameters())
+        raise AssertionError("double swap_in should raise")
+    except RuntimeError:
+        pass
