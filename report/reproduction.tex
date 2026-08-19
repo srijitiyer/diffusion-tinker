@@ -26,15 +26,17 @@
 
 \noindent\textbf{diffusion-tinker} runs RL post-training for diffusion models: give it a model, a reward, and prompts, and it runs one of six algorithms (FlowGRPO, DDRL, DRaFT, DiffusionDPO, DDPO, SFT) behind one \code{Trainer}/\code{Config} API on top of \code{diffusers}. Targets SD3.5 and FLUX.1.
 
-This supersedes the earlier report. I went through the RL math and the eval path line by line against the papers, and found ten things wrong. Two of them invalidate most of what I had previously claimed.
+This report replaces the earlier one. I checked the RL math and the eval code against the papers and the reference implementations, and I found ten problems. In my opinion two of them are bad enough that most of what I claimed before should not be used.
 
-The one that matters most: the SDE sampler was singular at its first timestep. At the noise level we run OCR at, that destroyed every rollout, and it had been doing so the whole time. Everything else in this report follows from that, so I have put it first. The full list is in \code{AUDIT.md} and what it invalidates is in \S\ref{sec:retract}.
+I think the most important one is the SDE sampler. It was singular at its first timestep, and at the noise level we run OCR at this destroyed every rollout. It had been doing that the whole time. Almost everything else in this report follows from it, so I have put it first. The full list is in \code{AUDIT.md}, and \S\ref{sec:retract} covers what it invalidates.
 
 \section{The bug that explains the rest}
 
 \code{sde\_step\_with\_logprob} uses $\sigma_t = \text{noise}\cdot\sqrt{\sigma/(1-\sigma)}$ as the diffusion coefficient. Both the SD3.5 and FLUX schedules start at $\sigma$ exactly $1.0$, which makes that term blow up.
 
-There was a clamp on it, so nothing ever crashed or printed a NaN. What it actually did was leave the first Euler step multiplying the latent by $-55.8$ at noise $0.7$. Every step after the first sits between $0.73$ and $1.00$, so it was only ever step zero, which is presumably why nobody caught it. At noise $0.1$ the same coefficient is $-0.16$, so the two noise levels we had been comparing were not the same experiment at all.
+There was a clamp on it, so nothing crashed and nothing printed a NaN. What the clamp actually did was leave the first Euler step multiplying the latent by $-55.8$ at noise $0.7$. Every step after the first one sits between $0.73$ and $1.00$. So the problem only ever happened at step zero, which is probably why nobody noticed it.
+
+In addition, at noise $0.1$ the same coefficient is $-0.16$ instead of $-55.8$. This means the two noise levels we had been comparing were not really the same experiment.
 
 The algebra is right. Our mean is $x + dt\,[v + \tfrac{\sigma_t^2}{2\sigma}(x + (1-\sigma)v)]$, the reverse SDE for rectified flow with score $\nabla\log p_t = -(x+(1-\sigma)v)/\sigma$, and it matches the reference. The score is finite at $\sigma=1$; only the diffusion coefficient blows up. Capping it so the step stays contractive fixes it and, on the real schedules, changes nothing after step~0.
 
@@ -54,13 +56,15 @@ after  & 0.1 & 1.076 & 0.375 & 0.518 & 0.9721 \\
 
 At noise $0.7$ the rollout reward was \emph{exactly} zero with \emph{exactly} zero within-group spread. The GRPO advantage is $(r-\bar r)/(\text{std}+\epsilon)$, so zero spread means zero advantage and the epoch was skipped outright. Eval never showed this because eval samples at noise $0$, where the term vanishes: a noise-0 eval of the same prompts scored $0.569$ while the rollout scored $0.005$.
 
-It also explains the importance ratio, which had been sitting near $0.92$ for weeks. I blamed bf16 rounding, then gradient checkpointing, then CFG, and spent a while on each. It was this the whole time. CFG in particular was never involved: with it on the ratio is $0.92$ and with it off $0.94$, and sampling stores the encoded negative embeddings that replay reuses, so both branches see identical conditioning anyway.
+This also explains the importance ratio, which had been sitting near $0.92$ for weeks. I blamed bf16 rounding first, then gradient checkpointing, then CFG, and I spent real time on each of them. It was the sampler the whole time.
+
+CFG in particular was never involved. With CFG on the ratio is $0.92$ and with it off it is $0.94$, so turning it off does not fix anything. Sampling also stores the encoded negative embeddings that replay reuses, which means both branches see identical conditioning anyway.
 
 \section{Eval was measuring noise}
 
-\code{\_evaluate} used \code{train\_prompts[:4]} and passed no generator. Three separate problems in one line. Four prompts is too few, they came from the training set so nothing was held out, and with no generator the sampler drew from whatever global RNG state training happened to leave behind, so every epoch saw different latents.
+\code{\_evaluate} used \code{train\_prompts[:4]} and passed no generator. There are three separate problems in that one line. Four prompts is too few to measure anything. The prompts came from the training set, so nothing was actually held out. And because no generator was passed, the sampler drew from whatever global RNG state training happened to leave behind, so every epoch evaluated on different latents.
 
-That last one explains the $\pm 0.5$ epoch-to-epoch swing in every curve we had made up to that point. I had been reading those curves as noisy measurements of a trend. They were just noise.
+That last problem is the important one. It explains the $\pm 0.5$ swing between epochs in every curve we had produced up to that point. I had been reading those curves as noisy measurements of a real trend. They were just noise.
 
 The fix was mostly obvious once the problem was. Eval takes a held-out prompt list now, and draws from its own seeded generator so every epoch sees the same latents and the curve only moves when the policy does. It also runs at epoch 0, which matters more than it sounds: without a baseline from the same seed and the same prompts, none of the later numbers mean anything.
 
