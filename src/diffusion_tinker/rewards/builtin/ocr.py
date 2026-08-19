@@ -98,9 +98,25 @@ class OCRReward(BaseReward):
             try:
                 from paddleocr import PaddleOCR
 
+                # paddleocr's GPU flag is about *paddle's* build, not torch's, and
+                # `pip install paddlepaddle` is the CPU wheel - asking it for a GPU
+                # it was not compiled with fails at the first inference rather than
+                # at construction, which would surface as a dead run mid-epoch.
+                paddle_gpu = False
+                if use_gpu:
+                    try:
+                        import paddle
+
+                        paddle_gpu = bool(paddle.is_compiled_with_cuda())
+                    except Exception:
+                        paddle_gpu = False
+                    if not paddle_gpu:
+                        print("OCR: paddle is a CPU build, running the recognizer "
+                              "on CPU (install paddlepaddle-gpu to change that)")
+
                 try:
                     self._reader = PaddleOCR(use_angle_cls=False, lang="en",
-                                             use_gpu=use_gpu, show_log=False)
+                                             use_gpu=paddle_gpu, show_log=False)
                 except (TypeError, ValueError):
                     self._reader = PaddleOCR(lang="en")
                 self._backend = "paddleocr"

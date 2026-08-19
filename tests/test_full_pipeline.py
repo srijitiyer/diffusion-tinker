@@ -1880,3 +1880,56 @@ def test_ema_refuses_unbalanced_swaps():
         raise AssertionError("double swap_in should raise")
     except RuntimeError:
         pass
+
+
+def test_ocr_reward_matches_flowgrpo_formula():
+    """Our OCR score must equal flow_grpo/ocr.py's, which is what the paper reports.
+
+    Their scorer, verbatim:
+
+        prompt = prompt.replace(' ', '').lower()
+        recognized_text = recognized_text.replace(' ', '').lower()
+        if prompt in recognized_text: dist = 0
+        else:                         dist = distance(recognized_text, prompt)
+        if dist > len(prompt):        dist = len(prompt)
+        reward = 1 - dist/len(prompt)
+
+    The substring shortcut is real and is theirs - it was worth checking, because
+    it is what makes the score depend on which recognizer is used: a chattier
+    engine reads more text, which can only ever help. That is the whole reason our
+    untrained baseline read 0.771 under EasyOCR against the paper's 0.566.
+
+    Driven through a stubbed recognizer so this tests the scoring, not the OCR.
+    """
+    from diffusion_tinker.rewards.builtin.ocr import OCRReward, _edit_distance
+
+    def flowgrpo_reference(recognized, target):
+        t = target.replace(" ", "").lower()
+        r = recognized.replace(" ", "").lower()
+        dist = 0 if t in r else _edit_distance(r, t)
+        dist = min(dist, len(t))
+        return 1 - dist / len(t)
+
+    cases = [
+        ("Take With Food", "Take With Food"),        # exact
+        ("takewithfood", "Take With Food"),          # spacing/case only
+        ("xx Take With Food xx", "Take With Food"),  # target embedded -> shortcut
+        ("Take With Fool", "Take With Food"),        # one substitution
+        ("", "Take With Food"),                      # nothing read
+        ("completely unrelated words", "Page 666"),  # capped at len(target)
+        ("Pag 666", "Page 666"),                     # one deletion
+    ]
+
+    scorer = OCRReward.__new__(OCRReward)  # no recognizer load
+    for recognized, target in cases:
+        scorer._ocr_image = lambda _img, _r=recognized: _r
+        got = OCRReward._score_single(scorer, object(), target)
+        want = flowgrpo_reference(recognized, target)
+        assert math.isclose(got, want, abs_tol=1e-9), (
+            f"recognized={recognized!r} target={target!r}: got {got}, "
+            f"flow_grpo gives {want}"
+        )
+
+    # and the cap really binds, so garbage reads floor at 0 rather than going negative
+    scorer._ocr_image = lambda _img: "z" * 500
+    assert OCRReward._score_single(scorer, object(), "Page 666") == 0.0
