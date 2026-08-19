@@ -65,3 +65,12 @@ LORA_AND_MEMORY_GUIDE.md
 REWARD_MODELS_TECHNICAL.md
 TRAINING_GUIDE.md
 .claude/
+
+# Writeups and findings records: kept local until they have been shared directly.
+report/reproduction.pdf
+report/reproduction.tex
+report/diffusion_tinker_walkthrough.pdf
+report/diffusion_tinker_walkthrough.tex
+report/blog.md
+AUDIT.md
+VALIDATION.md
