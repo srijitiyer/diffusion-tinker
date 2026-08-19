@@ -27,7 +27,13 @@ class TrainerCallback:
     def on_sample_end(self, trainer: Any, epoch: int, trajectory: Any) -> None:
         pass
 
-    def on_evaluate(self, trainer: Any, epoch: int, mean_reward: float) -> None:
+    def on_evaluate(
+        self,
+        trainer: Any,
+        epoch: int,
+        mean_reward: float,
+        extra_metrics: dict[str, float] | None = None,
+    ) -> None:
         pass
 
     def on_save(self, trainer: Any, epoch: int, path: str) -> None:

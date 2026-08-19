@@ -411,6 +411,16 @@ class BaseDiffusionTrainer(ABC):
             f"btemp={getattr(c, 'beta_temp', None)}",
             f"anchor={getattr(c, 'train_dataset', None)}",
             f"cap={getattr(c, 'caption_column', None)}/{getattr(c, 'condition_dropout', None)}",
+            # timestep_stride picks which sampling steps are optimized (DDRL's
+            # every-other-step T); timestep_sampling decides whether the anchor is
+            # noised to the step being optimized or to an independent draw, which
+            # is a different objective; and the eval sampler's step count and
+            # guidance decide what the reported number even means, so an arm
+            # evaluated at 28 steps is not comparable to one at 40.
+            f"tstride={getattr(c, 'timestep_stride', None)}",
+            f"tsamp={getattr(c, 'timestep_sampling', None)}",
+            f"evalsteps={c.num_eval_inference_steps}",
+            f"evalguid={c.eval_guidance_scale}",
             # The objective itself. Swapping the reward on the same tag was the
             # worst case: the new reward's curve reported on top of the old
             # reward's optimised adapter, with nothing to catch it.
@@ -560,6 +570,50 @@ class BaseDiffusionTrainer(ABC):
         self._fire_callbacks("on_save", epoch=epoch, path=str(save_path))
 
     @torch.no_grad()
+    def _score_eval_metrics(self, images, prompts) -> dict[str, float]:
+        """Score config.eval_metrics on the eval images. Reported, never optimized.
+
+        Loaded once and kept, because these are full vision models and paying the
+        load on every eval would cost more than the sampling. They go on
+        reward_device (default CPU) rather than next to the transformer: three
+        extra models on a 24GB card is what OOMs the following training step, and
+        eval is infrequent enough that CPU scoring is not the bottleneck.
+
+        A metric that fails to load is dropped with a warning rather than killing
+        the run. These are secondary diagnostics, and losing a whole training run
+        because ImageReward's weights are not on the node would be the wrong
+        trade.
+        """
+        names = self.config.eval_metrics
+        if not names:
+            return {}
+
+        if not hasattr(self, "_eval_metric_fns"):
+            from diffusion_tinker.rewards.resolve import resolve_reward
+
+            self._eval_metric_fns = {}
+            for name in names:
+                if name == getattr(self.reward_fn, "name", None):
+                    continue  # already reported as mean_reward
+                try:
+                    self._eval_metric_fns[name] = resolve_reward(
+                        name, device=self.config.reward_device or "cpu"
+                    )
+                except Exception as exc:
+                    print(f"eval_metrics: could not load {name!r} ({exc}), skipping it")
+
+        out = {}
+        for name, fn in self._eval_metric_fns.items():
+            try:
+                ctx = RewardContext(
+                    images=images, prompts=prompts,
+                    device=self.config.reward_device or "cpu", metadata={},
+                )
+                out[name] = fn(ctx).scores.mean().item()
+            except Exception as exc:
+                print(f"eval_metrics: {name!r} failed to score ({exc}), skipping it")
+        return out
+
     def _evaluate(self, epoch: int) -> float:
         """Generate eval images and compute reward stats. Returns mean reward."""
         self.transformer.eval()
@@ -609,7 +663,11 @@ class BaseDiffusionTrainer(ABC):
                     pipeline=self.pipeline,
                     prompts=eval_prompts[i : i + chunk],
                     num_inference_steps=self.config.num_eval_inference_steps,
-                    guidance_scale=self.config.guidance_scale,
+                    guidance_scale=(
+                        self.config.guidance_scale
+                        if self.config.eval_guidance_scale is None
+                        else self.config.eval_guidance_scale
+                    ),
                     noise_level=0.0,
                     height=self.config.resolution,
                     width=self.config.resolution,
@@ -635,10 +693,16 @@ class BaseDiffusionTrainer(ABC):
         reward_output = self.reward_fn(ctx)
         scores = reward_output.scores
         mean_reward = scores.mean().item()
-        self._fire_callbacks("on_evaluate", epoch=epoch, mean_reward=mean_reward)
+
+        extra_metrics = self._score_eval_metrics(eval_images, eval_prompts)
+        self._fire_callbacks(
+            "on_evaluate", epoch=epoch, mean_reward=mean_reward,
+            extra_metrics=extra_metrics,
+        )
 
         sem = scores.std().item() / max(len(scores) ** 0.5, 1.0)
-        print(f"Eval (epoch {epoch}): mean_reward={mean_reward:.3f} +/- {sem:.3f} (n={len(scores)})")
+        extra_str = "".join(f" {k}={v:.4f}" for k, v in extra_metrics.items())
+        print(f"Eval (epoch {epoch}): mean_reward={mean_reward:.3f} +/- {sem:.3f} (n={len(scores)}){extra_str}")
 
         eval_dir = Path(self.config.output_dir) / f"eval-{epoch}"
         eval_dir.mkdir(parents=True, exist_ok=True)

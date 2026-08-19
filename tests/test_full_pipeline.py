@@ -1421,3 +1421,210 @@ if __name__ == "__main__":
     test_checkpoint_save_load()
 
     print("\n=== ALL TESTS PASSED ===")
+
+
+def test_eval_reports_unoptimized_metrics_alongside_the_reward():
+    """A regularizer cannot be judged by the reward it is designed to spend.
+
+    DDRL's own paper reports a *lower* OCR than the baselines it beats (0.823 vs
+    FlowGRPO's 0.845) and wins on ClipScore/PickScore/ImageReward held at the base
+    model's values. Every sweep in this repo tracked only the optimized reward, so
+    the anchor could only ever score as a cost. This pins that config.eval_metrics
+    are scored on the eval images and reach the callback, so the other half of the
+    comparison is actually recorded.
+    """
+    from types import SimpleNamespace
+
+    from diffusion_tinker.trainers.base_trainer import BaseDiffusionTrainer
+
+    scored_with = {}
+
+    class FakeReward:
+        def __init__(self, name, value):
+            self.name = name
+            self.value = value
+
+        def __call__(self, ctx):
+            scored_with[self.name] = list(ctx.prompts)
+            return SimpleNamespace(
+                scores=torch.full((len(ctx.images),), self.value, dtype=torch.float32)
+            )
+
+    stub = SimpleNamespace(
+        config=SimpleNamespace(
+            eval_metrics=["clip_score", "pickscore"], reward_device="cpu"
+        ),
+        reward_fn=SimpleNamespace(name="ocr"),
+    )
+
+    fakes = {"clip_score": FakeReward("clip_score", 0.320),
+             "pickscore": FakeReward("pickscore", 0.865)}
+
+    import diffusion_tinker.rewards.resolve as resolve_mod
+
+    real = resolve_mod.resolve_reward
+    resolve_mod.resolve_reward = lambda name, device="cpu", **kw: fakes[name]
+    try:
+        got = BaseDiffusionTrainer._score_eval_metrics(
+            stub, images=["img1", "img2"], prompts=["a sign saying 'CAT'"] * 2
+        )
+    finally:
+        resolve_mod.resolve_reward = real
+
+    assert sorted(got) == ["clip_score", "pickscore"]
+    assert math.isclose(got["clip_score"], 0.320, abs_tol=1e-6)
+    assert math.isclose(got["pickscore"], 0.865, abs_tol=1e-6)
+    # scored on the eval images, not the rollout
+    assert scored_with["clip_score"] == ["a sign saying 'CAT'"] * 2
+
+
+def test_eval_metrics_skips_the_reward_already_being_optimized():
+    """Listing the training reward in eval_metrics must not double-report it.
+
+    Otherwise a config that names its own reward gets one column called
+    mean_reward and an identical one beside it, which reads as independent
+    corroboration when it is the same number twice.
+    """
+    from types import SimpleNamespace
+
+    from diffusion_tinker.trainers.base_trainer import BaseDiffusionTrainer
+
+    stub = SimpleNamespace(
+        config=SimpleNamespace(eval_metrics=["ocr"], reward_device="cpu"),
+        reward_fn=SimpleNamespace(name="ocr"),
+    )
+
+    import diffusion_tinker.rewards.resolve as resolve_mod
+
+    real = resolve_mod.resolve_reward
+
+    def boom(*a, **k):
+        raise AssertionError("resolve_reward called for the optimized reward")
+
+    resolve_mod.resolve_reward = boom
+    try:
+        assert BaseDiffusionTrainer._score_eval_metrics(stub, ["i"], ["p"]) == {}
+    finally:
+        resolve_mod.resolve_reward = real
+
+
+def test_a_broken_eval_metric_does_not_kill_the_run():
+    """Secondary diagnostics must not be able to end a training run.
+
+    ImageReward's weights are not on every node. Losing a multi-hour run because
+    a reported-only metric failed to load would be the wrong trade, so a failure
+    is dropped and the rest still report.
+    """
+    from types import SimpleNamespace
+
+    from diffusion_tinker.trainers.base_trainer import BaseDiffusionTrainer
+
+    stub = SimpleNamespace(
+        config=SimpleNamespace(
+            eval_metrics=["broken", "clip_score"], reward_device="cpu"
+        ),
+        reward_fn=SimpleNamespace(name="ocr"),
+    )
+
+    def fake_resolve(name, device="cpu", **kw):
+        if name == "broken":
+            raise RuntimeError("no weights on this node")
+        return lambda ctx: SimpleNamespace(scores=torch.tensor([0.321]))
+
+    import diffusion_tinker.rewards.resolve as resolve_mod
+
+    real = resolve_mod.resolve_reward
+    resolve_mod.resolve_reward = fake_resolve
+    try:
+        got = BaseDiffusionTrainer._score_eval_metrics(stub, ["i"], ["p"])
+    finally:
+        resolve_mod.resolve_reward = real
+
+    assert sorted(got) == ["clip_score"]
+    assert math.isclose(got["clip_score"], 0.321, abs_tol=1e-6)
+
+
+def test_matched_timestep_anchors_on_the_step_being_optimized():
+    """timestep_sampling="matched" must noise the anchor to the RL step's sigma.
+
+    Algorithm 1 line 5 noises the anchor to the same t the loop is optimizing
+    ("for t in T: get noisy x_t based on (x_0, eps, t)"), and the appendix is
+    explicit: "forward noising and diffusion loss computation are performed
+    exactly on the corresponding sampling timesteps". Our two existing modes draw
+    a fresh t with no relation to the step under optimization, so the anchor
+    pulls at one noise level while the policy gradient pushes at another.
+
+    Behavioural rather than source-inspecting: it captures the sigmas that
+    actually reach compute_flow_matching_loss and checks them against the
+    schedule, so it fails if the wiring is right but the value is wrong.
+    """
+    from types import SimpleNamespace
+
+    import diffusion_tinker.trainers.ddrl_trainer as ddrl_mod
+    from diffusion_tinker.trainers.ddrl_trainer import DDRLTrainer
+
+    B, T, C, H, W = 2, 4, 4, 8, 8
+    sigmas = torch.linspace(0.9, 0.1, T + 1)
+
+    traj = TrajectoryBatch(
+        latents=torch.randn(B, T, C, H, W),
+        next_latents=torch.randn(B, T, C, H, W),
+        log_probs=torch.randn(B, T),
+        timesteps=sigmas,
+        prompt_embeds=torch.randn(B, 4, 8),
+        pooled_embeds=torch.randn(B, 8),
+        prompts=["p"] * B,
+        rewards=torch.tensor([1.0, 0.0]),
+        images=[Image.new("RGB", (8, 8))] * B,
+    )
+    traj.advantages = torch.tensor([1.0, -1.0])
+
+    seen_sigmas = []
+
+    def fake_flow_loss(**kw):
+        seen_sigmas.append(kw["sigmas"].detach().clone())
+        return torch.zeros((), requires_grad=True)
+
+    def fake_replay(**kw):
+        lp = torch.zeros(len(kw["latent_t"]), requires_grad=True)
+        return lp, None
+
+    stub = SimpleNamespace(
+        device=torch.device("cpu"),
+        config=DDRLConfig(
+            data_beta=0.5, timestep_sampling="matched", train_batch_size=None,
+            mixed_precision="bf16", timestep_fraction=1.0, timestep_stride=1,
+            condition_dropout=0.0, clip_range=1e-3, adv_clip_max=5.0,
+            noise_level=0.7, guidance_scale=4.5, max_grad_norm=1.0,
+        ),
+        transformer=torch.nn.Linear(4, 4),
+        optimizer=SimpleNamespace(zero_grad=lambda: None, step=lambda: None),
+        _model_type="sd3",
+        _data_latents=torch.randn(3, C, H, W),
+        _data_captions=None,
+        _uncond_embeds=torch.randn(1, 4, 8),
+        _uncond_pooled=torch.randn(1, 8),
+        _replay_step=lambda **kw: fake_replay(**kw),
+    )
+
+    real = ddrl_mod.compute_flow_matching_loss
+    ddrl_mod.compute_flow_matching_loss = fake_flow_loss
+    try:
+        DDRLTrainer._training_step(stub, traj)
+    finally:
+        ddrl_mod.compute_flow_matching_loss = real
+
+    assert seen_sigmas, "the anchor term never ran, so nothing was pinned"
+    # Every sigma handed to the diffusion loss must be one the sampler actually
+    # visited, and constant across the minibatch (one step, one noise level).
+    schedule = set(round(float(s), 6) for s in sigmas)
+    for got in seen_sigmas:
+        assert got.shape == (B,), f"expected one sigma per trajectory, got {got.shape}"
+        assert len(set(got.tolist())) == 1, f"sigma varies within a step: {got}"
+        assert round(float(got[0]), 6) in schedule, (
+            f"anchor noised to {float(got[0])}, which is not a sampling timestep"
+        )
+    # and the set of them must be the steps that were optimized, not one repeated
+    assert len(set(round(float(g[0]), 6) for g in seen_sigmas)) > 1, (
+        "every step anchored at the same sigma; matched mode is not following j"
+    )

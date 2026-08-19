@@ -27,7 +27,20 @@ class DDRLConfig(BaseDiffusionConfig):
     # that the PPO term discourages every sampled action and the policy collapses.
     use_monotonic_transform: bool = False
 
-    # Timestep sampling for data loss
+    # Timestep sampling for data loss.
+    #
+    # "matched" is what the paper does: Algorithm 1 noises the anchor to the same
+    # timestep t the RL term is being optimized at (`for t in T: get noisy x_t
+    # based on (x_0, eps, t)`), and the appendix says it outright - "forward
+    # noising and diffusion loss computation are performed exactly on the
+    # corresponding sampling timesteps". The other two draw a fresh t unrelated to
+    # the step under optimization, so the anchor pulls at one noise level while
+    # the policy gradient pushes at another, and the two terms only line up on
+    # average over a run rather than within a step.
+    #
+    # "logit_normal" is the default only because every result in VALIDATION.md was
+    # produced under it; it is standard diffusion *training* practice, which is a
+    # different setting. Use "matched" for anything compared against the paper.
     timestep_sampling: str = "logit_normal"
     logit_mean: float = 0.0
     logit_std: float = 1.0

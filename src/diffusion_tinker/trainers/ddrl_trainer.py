@@ -210,7 +210,10 @@ class DDRLTrainer(BaseDiffusionTrainer):
         num_computed_steps = 0
 
         num_train = max(1, int(num_steps * config.timestep_fraction))
-        timestep_indices = list(range(num_train))
+        stride = max(1, getattr(config, "timestep_stride", 1))
+        timestep_indices = list(range(0, num_steps if stride > 1 else num_train, stride))
+        if stride > 1:
+            timestep_indices = timestep_indices[:max(1, num_steps // stride)]
         random.shuffle(timestep_indices)
 
         autocast_dtype = torch.bfloat16 if config.mixed_precision == "bf16" else torch.float16
@@ -289,7 +292,13 @@ class DDRLTrainer(BaseDiffusionTrainer):
                 if config.data_beta > 0 and has_signal:
                     # timestep_sampling was declared in DDRLConfig and read
                     # nowhere, so "uniform" silently trained logit-normal.
-                    if config.timestep_sampling == "uniform":
+                    if config.timestep_sampling == "matched":
+                        # Algorithm 1 line 5: the anchor is noised to the same
+                        # timestep the RL term is optimizing this pass, not to an
+                        # independent draw. `sigma` is already the sigma for step
+                        # j; broadcast it over the minibatch.
+                        t = sigma.detach().reshape(-1)[:1].expand(mb_batch_size).to(device)
+                    elif config.timestep_sampling == "uniform":
                         t = torch.rand(mb_batch_size, device=device)
                     elif config.timestep_sampling == "logit_normal":
                         u = torch.normal(mean=config.logit_mean, std=config.logit_std,
@@ -297,8 +306,8 @@ class DDRLTrainer(BaseDiffusionTrainer):
                         t = torch.sigmoid(u)
                     else:
                         raise ValueError(
-                            "timestep_sampling must be 'logit_normal' or 'uniform', "
-                            f"got {config.timestep_sampling!r}"
+                            "timestep_sampling must be 'matched', 'logit_normal' or "
+                            f"'uniform', got {config.timestep_sampling!r}"
                         )
 
                     assert self._data_latents is not None, "data_beta > 0 requires train_dataset"

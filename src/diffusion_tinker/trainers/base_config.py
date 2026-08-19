@@ -69,12 +69,29 @@ class BaseDiffusionConfig:
     # policy moves. Without it eval shares the global RNG stream, which training
     # advances by a different amount each epoch and which swamps the signal.
     eval_seed: int = 1234
+    # Extra reward names scored on the eval images alongside the training reward,
+    # reported but never optimized. Needed to measure a regularizer at all: DDRL
+    # buys off-distribution behaviour by *spending* task reward, and its own
+    # paper reports a lower OCR than the baselines it beats (0.823 against
+    # FlowGRPO's 0.845) while holding ClipScore/PickScore/ImageReward at the base
+    # model's values, which is where its human-preference win comes from. Track
+    # only the optimized reward and the anchor can only ever look like a cost.
+    # e.g. ["clip_score", "pickscore"]. None = just the training reward.
+    eval_metrics: list[str] | None = None
 
     # Sampling / rollout
     num_samples_per_prompt: int = 4
     num_inference_steps: int = 28
     num_eval_inference_steps: int = 28
     guidance_scale: float = 7.0
+    # Guidance for the eval sampler. None = use guidance_scale, which is what this
+    # did before and is wrong whenever an algorithm's rollout guidance differs
+    # from the settings its numbers are meant to be comparable at. DDRL drops CFG
+    # for rollout ("DDRL does not adopt CFG") while FlowGRPO keeps it, so with one
+    # shared knob the two arms are also evaluated differently and the reward gap
+    # between them partly measures the eval, not the policy. Set this to the base
+    # model's default (4.5 for SD3.5) across every arm being compared.
+    eval_guidance_scale: float | None = None
     # SDE exploration noise. For FlowGRPO-style RL with a KL anchor, use ~0.7
     # (the FlowGRPO value). Beware: the per-step KL penalty scales as
     # 1/noise_level**2 (its variance is std_dev_t**2 ~ noise_level**2), so a
@@ -116,6 +133,12 @@ class BaseDiffusionConfig:
     # log-prob is ill-conditioned and the importance ratio is unreliable;
     # FlowGRPO drops them with timestep_fraction=0.99. 1.0 = train on all steps.
     timestep_fraction: float = 0.99
+    # Stride over the denoising steps, so T = {0, stride, 2*stride, ...}. DDRL's
+    # published algorithm trains on T = {0,2,4,...,18} out of 20, i.e. every other
+    # step across the whole trajectory. timestep_fraction alone cannot express
+    # that: it takes a contiguous prefix, so 0.5 gives steps 0-9, which is the
+    # high-sigma half rather than a spread. Leave at 1 for the prefix behaviour.
+    timestep_stride: int = 1
     # Normalize advantages by the global batch std instead of per-prompt std.
     # Helps low-variance rewards (e.g. aesthetic) where a tiny per-prompt std
     # otherwise amplifies sampling noise. Matches FlowGRPO's global_std option.
