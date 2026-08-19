@@ -56,6 +56,7 @@ def sd3_sample_with_logprob(
     num_inference_steps: int = 10,
     guidance_scale: float = 7.0,
     noise_level: float = 0.7,
+    sde_window: tuple[int, int] | None = None,
     height: int = 512,
     width: int = 512,
     generator: torch.Generator | None = None,
@@ -103,10 +104,26 @@ def sd3_sample_with_logprob(
     all_next_latents = []
     all_log_probs = []
 
+    # FlowGRPO's windowed SDE: run stochastically on a short contiguous window of
+    # steps and deterministically everywhere else, training only on the window
+    # (flow_grpo/diffusers_patch/flux_pipeline_with_logprob_fast.py). Their FLUX
+    # config uses sde_window_size=3 inside (0, num_steps//2) on a 6-step model;
+    # their SD3 configs leave it off, which is what sde_window=None gives.
+    #
+    # The window is chosen by the caller, not here, because a rollout batch is
+    # assembled from one call per prompt and every trajectory in it has to share a
+    # sigma sub-schedule to be stackable.
+    if sde_window is None:
+        w_start, w_end = 0, len(sigmas) - 1
+    else:
+        w_start, w_end = sde_window
+
     for i, sigma in enumerate(sigmas[:-1]):
         sigma_next = sigmas[i + 1]
 
-        all_latents.append(latents.detach().cpu())
+        in_window = w_start <= i < w_end
+        if in_window:
+            all_latents.append(latents.detach().cpu())
 
         latent_model_input = torch.cat([latents] * 2, dim=0) if do_cfg else latents
         sigma_input = sigma.expand(latent_model_input.shape[0])
@@ -131,6 +148,8 @@ def sd3_sample_with_logprob(
             noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
 
         step_noise_level = noise_level if i < len(sigmas) - 2 else 0.0
+        if not in_window:
+            step_noise_level = 0.0
 
         sigma_batch = sigma.expand(batch_size)
         sigma_next_batch = sigma_next.expand(batch_size)
@@ -150,8 +169,9 @@ def sd3_sample_with_logprob(
         # 0 at low sigma, that tiny shift blows up the per-step log-prob and
         # biases the importance ratio away from 1.0. Round only for the next
         # step's transformer input.
-        all_next_latents.append(latents.detach().cpu())
-        all_log_probs.append(log_prob.detach().cpu())
+        if in_window:
+            all_next_latents.append(latents.detach().cpu())
+            all_log_probs.append(log_prob.detach().cpu())
 
         latents = latents.to(dtype)
 
@@ -166,7 +186,9 @@ def sd3_sample_with_logprob(
         latents_trajectory=latents_traj,
         next_latents_trajectory=next_latents_traj,
         log_probs=log_probs_traj,
-        timesteps=sigmas.cpu(),
+        # Only the window's sigmas, so trajectory.timesteps[j] and [j+1] still
+        # line up with stored step j. With no window this is the whole schedule.
+        timesteps=sigmas[w_start:w_end + 1].cpu(),
         prompt_embeds=prompt_embeds.detach().cpu(),
         pooled_embeds=pooled_prompt_embeds.detach().cpu(),
         negative_prompt_embeds=negative_prompt_embeds.detach().cpu() if do_cfg else None,

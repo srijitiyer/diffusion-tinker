@@ -88,6 +88,7 @@ def flux_sample_with_logprob(
     num_inference_steps: int = 28,
     guidance_scale: float = 3.5,
     noise_level: float = 0.7,
+    sde_window: tuple[int, int] | None = None,
     height: int = 1024,
     width: int = 1024,
     generator: torch.Generator | None = None,
@@ -178,9 +179,21 @@ def flux_sample_with_logprob(
     # is unbiased - see the equivalent note in sd3_patch.
     autocast_dtype = torch.bfloat16 if dtype == torch.bfloat16 else torch.float16
 
+    # See sd3_patch: FlowGRPO runs FLUX with a short stochastic window
+    # (sde_window_size=3 inside (0, num_steps//2) on a 6-step model) and
+    # deterministically elsewhere, training only on the window. This is the model
+    # it actually matters for - FLUX.1-dev is guidance-distilled and few-step, and
+    # injecting exploration noise at every step is not how they drive it.
+    if sde_window is None:
+        w_start, w_end = 0, len(sigmas) - 1
+    else:
+        w_start, w_end = sde_window
+
     for i, sigma in enumerate(sigmas[:-1]):
         sigma_next = sigmas[i + 1]
-        all_latents.append(latents.detach().cpu())
+        in_window = w_start <= i < w_end
+        if in_window:
+            all_latents.append(latents.detach().cpu())
 
         timestep = sigma.expand(batch_size)
 
@@ -197,6 +210,8 @@ def flux_sample_with_logprob(
             )[0]
 
         step_noise_level = noise_level if i < len(sigmas) - 2 else 0.0
+        if not in_window:
+            step_noise_level = 0.0
         sigma_batch = sigma.expand(batch_size)
         sigma_next_batch = sigma_next.expand(batch_size)
 
@@ -213,8 +228,9 @@ def flux_sample_with_logprob(
         # rounding to bf16 before storing shifts the target and, with the SDE
         # std near 0 at low sigma, biases the importance ratio. Round only for
         # the next transformer input.
-        all_next_latents.append(latents.detach().cpu())
-        all_log_probs.append(log_prob.detach().cpu())
+        if in_window:
+            all_next_latents.append(latents.detach().cpu())
+            all_log_probs.append(log_prob.detach().cpu())
 
         latents = latents.to(dtype)
 
@@ -239,7 +255,7 @@ def flux_sample_with_logprob(
         latents_trajectory=torch.stack(all_latents, dim=1),
         next_latents_trajectory=torch.stack(all_next_latents, dim=1),
         log_probs=torch.stack(all_log_probs, dim=1),
-        timesteps=sigmas.cpu(),
+        timesteps=sigmas[w_start:w_end + 1].cpu(),
         prompt_embeds=prompt_embeds.detach().cpu(),
         pooled_embeds=pooled_prompt_embeds.detach().cpu(),
         img_ids=img_ids.detach().cpu(),

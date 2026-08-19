@@ -1974,3 +1974,118 @@ def test_sde_diffusion_std_matches_flowgrpo_reference():
     # and it is still finite at the singularity, which is what the clamp was for
     v = float(sde_diffusion_std(torch.tensor(1.0), torch.tensor(0.9643), noise))
     assert math.isfinite(v) and v > 0
+
+
+def _run_tiny_sd3_rollout(n_steps, sde_window):
+    """Drive sd3_sample_with_logprob on stub parts, with no model weights.
+
+    Only what the sampler touches: a transformer with a device/dtype/in_channels
+    and a forward, an encode_prompt, a scheduler exposing sigmas, and a decode.
+    """
+    from types import SimpleNamespace
+
+    import diffusion_tinker.models.sd3_patch as sd3
+
+    C, H, W, B = 4, 16, 16, 2
+
+    class TinyT(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.lin = torch.nn.Linear(C, C)
+            self.config = SimpleNamespace(in_channels=C)
+
+        @property
+        def device(self):
+            return torch.device("cpu")
+
+        @property
+        def dtype(self):
+            return torch.float32
+
+        def forward(self, hidden_states=None, timestep=None, encoder_hidden_states=None,
+                    pooled_projections=None, return_dict=False, **kw):
+            x = hidden_states.permute(0, 2, 3, 1)
+            return (self.lin(x).permute(0, 3, 1, 2),)
+
+    class Sched:
+        def set_timesteps(self, n, device=None, **kw):
+            t = torch.linspace(1.0, 1.0 / n, n)
+            self.sigmas = torch.cat([3.0 * t / (1 + 2.0 * t), torch.zeros(1)])
+
+    def encode_prompt(prompt=None, negative_prompt=None, do_classifier_free_guidance=False, **kw):
+        n = len(prompt)
+        e, pe = torch.randn(n, 4, 8), torch.randn(n, 8)
+        return e, e.clone(), pe, pe.clone()
+
+    pipe = SimpleNamespace(
+        transformer=TinyT(), vae=None, scheduler=Sched(), encode_prompt=encode_prompt
+    )
+
+    real_decode, real_pil = sd3._decode_latents, sd3._tensor_to_pil
+    sd3._decode_latents = lambda _p, lat: torch.zeros(lat.shape[0], 3, H, W)
+    sd3._tensor_to_pil = lambda t: [Image.new("RGB", (W, H)) for _ in range(t.shape[0])]
+    try:
+        return sd3.sd3_sample_with_logprob(
+            pipeline=pipe, prompts=["a"] * B, num_inference_steps=n_steps,
+            guidance_scale=1.0, noise_level=0.7, sde_window=sde_window,
+            height=H * 8, width=W * 8,
+        )
+    finally:
+        sd3._decode_latents, sd3._tensor_to_pil = real_decode, real_pil
+
+
+def test_sde_window_confines_noise_and_training_to_the_window():
+    """Windowed SDE must be stochastic only inside the window, and store only it.
+
+    flow_grpo's FLUX sampler draws a contiguous window per rollout, runs
+    noise_level inside it and 0 outside, and keeps only in-window steps for
+    training. Their geneval_flux_fast uses size 3 inside (0, num_steps//2) on a
+    6-step model. We ran full SDE on every step at every FLUX result in this repo.
+
+    The stored sigma sub-schedule matters as much as the noise: the trainer reads
+    trajectory.timesteps[j] and [j+1] for stored step j, so if only a window is
+    kept, timesteps has to be sliced to match or every replayed step uses the
+    wrong sigma.
+    """
+    import diffusion_tinker.models.sd3_patch as sd3
+
+    seen_noise = []
+
+    real_step = sd3.sde_step_with_logprob
+
+    def spy(**kw):
+        seen_noise.append(kw["noise_level"])
+        return real_step(**kw)
+
+    n_steps, window = 8, (2, 5)
+    sd3.sde_step_with_logprob = spy
+    try:
+        out = _run_tiny_sd3_rollout(n_steps=n_steps, sde_window=window)
+    finally:
+        sd3.sde_step_with_logprob = real_step
+
+    # noise on inside the window, off outside
+    expected = [0.7 if window[0] <= i < window[1] else 0.0 for i in range(n_steps)]
+    expected[-1] = 0.0  # final step is always deterministic
+    assert seen_noise == expected, f"noise per step {seen_noise}, expected {expected}"
+
+    # only the window's steps are stored
+    kept = window[1] - window[0]
+    assert out.log_probs.shape[1] == kept, (
+        f"stored {out.log_probs.shape[1]} steps, window keeps {kept}"
+    )
+    assert out.latents_trajectory.shape[1] == kept
+    # and the sigma schedule is sliced to match, so timesteps[j]/[j+1] are the
+    # sigmas of stored step j
+    assert len(out.timesteps) == kept + 1, (
+        f"timesteps has {len(out.timesteps)} entries for {kept} stored steps; "
+        "the trainer indexes [j] and [j+1] so it needs kept+1"
+    )
+
+
+def test_no_sde_window_keeps_every_step():
+    """sde_window=None must be exactly the previous behaviour."""
+    n_steps = 6
+    out = _run_tiny_sd3_rollout(n_steps=n_steps, sde_window=None)
+    assert out.log_probs.shape[1] == n_steps
+    assert len(out.timesteps) == n_steps + 1

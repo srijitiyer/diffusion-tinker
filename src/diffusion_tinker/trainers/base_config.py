@@ -132,6 +132,21 @@ class BaseDiffusionConfig:
     # check the other; `mean_ratio` in the logged metrics tells you which
     # regime you are in.
     noise_level: float = 0.7
+    # Windowed SDE: sample stochastically on a randomly placed contiguous window
+    # of this many steps and deterministically elsewhere, training only on the
+    # window. 0 = stochastic on every step, which is what SD3.5 uses.
+    #
+    # FlowGRPO turns this on for FLUX and not for SD3: geneval_flux_fast sets
+    # sde_window_size=3 with sde_window_range=(0, num_steps//2) on a 6-step model,
+    # alongside noise_level 0.8 and clip_range 1e-5. FLUX.1-dev is
+    # guidance-distilled and few-step, and putting exploration noise on every step
+    # of a 6-step trajectory is not how they drive it - which is what every FLUX
+    # number in this repo was measured under.
+    sde_window_size: int = 0
+    # (lo, hi) bounds the window start; the window is [start, start+size) with
+    # start drawn uniformly from [lo, hi-size]. None = (0, num_inference_steps//2),
+    # their setting.
+    sde_window_range: tuple[int, int] | None = None
     resolution: int = 512
 
     # RL

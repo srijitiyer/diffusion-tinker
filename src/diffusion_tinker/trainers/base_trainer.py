@@ -142,6 +142,17 @@ class BaseDiffusionTrainer(ABC):
         all_outputs = []
         expanded_prompts: list[str] = []
 
+        # One window for the whole rollout batch, not one per prompt. Each prompt
+        # is a separate sampler call and the results are stacked, so they have to
+        # agree on which steps were kept or the sigma sub-schedules do not line up.
+        sde_window = None
+        if getattr(self.config, "sde_window_size", 0) > 0:
+            size = self.config.sde_window_size
+            lo, hi = self.config.sde_window_range or (0, self.config.num_inference_steps // 2)
+            hi = max(lo + size, min(hi, self.config.num_inference_steps))
+            start = random.randint(lo, hi - size)
+            sde_window = (start, start + size)
+
         for p in prompts:
             batch = [p] * self.config.num_samples_per_prompt
             expanded_prompts.extend(batch)
@@ -156,6 +167,7 @@ class BaseDiffusionTrainer(ABC):
                     noise_level=self.config.noise_level,
                     height=self.config.resolution,
                     width=self.config.resolution,
+                    sde_window=sde_window,
                 )
             else:
                 from diffusion_tinker.models.sd3_patch import sd3_sample_with_logprob
@@ -167,6 +179,7 @@ class BaseDiffusionTrainer(ABC):
                     noise_level=self.config.noise_level,
                     height=self.config.resolution,
                     width=self.config.resolution,
+                    sde_window=sde_window,
                 )
             all_outputs.append(output)
 
