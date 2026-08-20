@@ -89,6 +89,7 @@ def flux_sample_with_logprob(
     guidance_scale: float = 3.5,
     noise_level: float = 0.7,
     sde_window: tuple[int, int] | None = None,
+    init_latents: torch.Tensor | None = None,
     height: int = 1024,
     width: int = 1024,
     generator: torch.Generator | None = None,
@@ -108,12 +109,16 @@ def flux_sample_with_logprob(
     latent_channels = 16
     latent_h = height // 8
     latent_w = width // 8
-    latents_spatial = torch.randn(
-        (batch_size, latent_channels, latent_h, latent_w),
-        dtype=dtype,
-        device=device,
-        generator=generator,
-    )
+    if init_latents is not None:
+        # see sd3_patch: eval supplies its own noise so chunking cannot move it
+        latents_spatial = init_latents.to(device=device, dtype=dtype)
+    else:
+        latents_spatial = torch.randn(
+            (batch_size, latent_channels, latent_h, latent_w),
+            dtype=dtype,
+            device=device,
+            generator=generator,
+        )
 
     latents = _pack_latents(latents_spatial, height, width)
 

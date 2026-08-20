@@ -57,6 +57,7 @@ def sd3_sample_with_logprob(
     guidance_scale: float = 7.0,
     noise_level: float = 0.7,
     sde_window: tuple[int, int] | None = None,
+    init_latents: torch.Tensor | None = None,
     height: int = 512,
     width: int = 512,
     generator: torch.Generator | None = None,
@@ -88,12 +89,20 @@ def sd3_sample_with_logprob(
     )
 
     latent_channels = pipeline.transformer.config.in_channels
-    latents = torch.randn(
-        (batch_size, latent_channels, height // 8, width // 8),
-        dtype=dtype,
-        device=device,
-        generator=generator,
-    )
+    if init_latents is not None:
+        # Caller supplied the starting noise. Eval does this so the result cannot
+        # depend on how the eval set was chunked: CUDA's Philox generator does not
+        # produce the same values for randn((8,...)) as for two randn((4,...))
+        # calls, so drawing per chunk made train_batch_size change the reported
+        # number even after the zero-noise draw was removed.
+        latents = init_latents.to(device=device, dtype=dtype)
+    else:
+        latents = torch.randn(
+            (batch_size, latent_channels, height // 8, width // 8),
+            dtype=dtype,
+            device=device,
+            generator=generator,
+        )
 
     pipeline.scheduler.set_timesteps(num_inference_steps, device=device)
     sigmas = pipeline.scheduler.sigmas

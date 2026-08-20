@@ -703,6 +703,22 @@ class BaseDiffusionTrainer(ABC):
         # A held-out eval set is far bigger than a rollout batch, so sample it in
         # chunks rather than one call that would OOM on the VAE decode.
         chunk = self.config.train_batch_size or len(eval_prompts)
+
+        # Draw the whole eval set's starting noise in ONE call, then hand each
+        # chunk its slice. Drawing inside the sampler made the number depend on
+        # train_batch_size: CUDA's Philox generator does not give the same values
+        # for randn((8,...)) as for two randn((4,...)) calls, so the same
+        # untrained model scored 0.594 at chunk 8 and 0.604 at chunk 4 on one
+        # node. train_batch_size is a memory knob and must not move a measurement.
+        lat_c = 16 if self._model_type == "flux" else self.pipeline.transformer.config.in_channels
+        eval_latents = torch.randn(
+            (len(eval_prompts), lat_c,
+             self.config.resolution // 8, self.config.resolution // 8),
+            dtype=torch.bfloat16 if self.config.mixed_precision == "bf16" else torch.float16,
+            device=self.device,
+            generator=eval_gen,
+        )
+
         eval_images = []
         # FlowGRPO evaluates the averaged weights, not the live ones
         # (scripts/train_sd3.py copies the EMA in around eval and back out after).
@@ -725,6 +741,7 @@ class BaseDiffusionTrainer(ABC):
                     height=self.config.resolution,
                     width=self.config.resolution,
                     generator=eval_gen,
+                    init_latents=eval_latents[i : i + chunk],
                 )
                 eval_images.extend(out.images)
         finally:

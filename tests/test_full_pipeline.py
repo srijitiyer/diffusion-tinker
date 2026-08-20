@@ -2149,3 +2149,46 @@ def test_eval_is_invariant_to_the_chunk_size_it_runs_in():
         "the stochastic path should still consume RNG per step; if this passes, "
         "noise is no longer being drawn during training either"
     )
+
+
+def test_eval_draws_its_noise_once_not_per_chunk():
+    """Eval must draw all its starting noise in one call, before chunking.
+
+    The earlier version of this fix only stopped the zero-coefficient noise draw
+    inside the SDE step. That made eval chunk-invariant on CPU, where
+    randn((8,...)) equals two randn((4,...)) calls, and the CPU test passed - but
+    CUDA's Philox advances its offset in blocks and maps threads by tensor shape,
+    so it does NOT hold there. On hardware the same untrained model still scored
+    0.594 at train_batch_size=8 and 0.604 at 4, on the same node.
+
+    So this checks the structural property rather than a numeric one: _evaluate
+    allocates the eval noise once for the whole set and passes slices to the
+    sampler, which is chunk-invariant on any device. A numeric CPU equality test
+    cannot catch the regression this is guarding against.
+    """
+    import inspect
+
+    from diffusion_tinker.trainers.base_trainer import BaseDiffusionTrainer
+
+    src = inspect.getsource(BaseDiffusionTrainer._evaluate)
+
+    draw = src.index("eval_latents = torch.randn")
+    loop = src.index("for i in range(0, len(eval_prompts), chunk)")
+    assert draw < loop, (
+        "eval noise is drawn inside the chunk loop; that reintroduces the "
+        "train_batch_size dependence on CUDA"
+    )
+    assert "init_latents=eval_latents[i : i + chunk]" in src, (
+        "each chunk must receive its slice of the single draw"
+    )
+    # the samplers must actually honour it rather than drawing their own
+    for mod in ("sd3_patch", "flux_patch"):
+        m = __import__(f"diffusion_tinker.models.{mod}", fromlist=[mod])
+        fn = getattr(m, "sd3_sample_with_logprob", None) or m.flux_sample_with_logprob
+        fsrc = inspect.getsource(fn)
+        assert "init_latents" in inspect.signature(fn).parameters, (
+            f"{mod} sampler does not accept init_latents"
+        )
+        assert "if init_latents is not None" in fsrc, (
+            f"{mod} sampler ignores init_latents and draws its own noise"
+        )
