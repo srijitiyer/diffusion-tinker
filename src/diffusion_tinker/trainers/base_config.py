@@ -40,9 +40,16 @@ class BaseDiffusionConfig:
     train_batch_size: int | None = None
 
     # Accumulate gradients across the train_batch_size chunks and step ONCE per
-    # epoch, instead of stepping per chunk. This is what makes train_batch_size a
-    # pure memory knob: with it on, the optimizer sees the full rollout batch and
-    # halving the chunk changes peak memory and nothing else.
+    # epoch, instead of stepping per chunk. With it on, the optimizer sees the
+    # full rollout batch and halving the chunk no longer changes the optimization.
+    #
+    # It does NOT make train_batch_size free of consequence, which an earlier
+    # version of this comment claimed. bf16 matmuls select cuBLAS kernels by
+    # shape, so a different chunk produces slightly different activations, and
+    # OCR is near-binary per image - a nudge flips an image between 0 and 1.
+    # Measured on one node, same model, same prompts, same pinned eval latents:
+    # train_batch_size=8 scored 0.607 and 4 scored 0.565. Arms being compared
+    # must therefore share train_batch_size as well as GPU model.
     #
     # Needed to reproduce DDRL. Algorithm 1 collects a rollout, computes every
     # L^n_t, and line 8 updates once "w.r.t. all L^n_t"; the paper's ~300
