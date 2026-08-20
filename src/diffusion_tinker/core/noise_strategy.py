@@ -89,8 +89,20 @@ def sde_step_with_logprob(
     noise_std = std_dev_t * torch.sqrt((-dt).clamp(min=1e-12))
 
     if prev_sample is None:
-        noise = torch.randn(sample.shape, dtype=sample.dtype, device=sample.device, generator=generator)
-        prev_sample = prev_sample_mean + noise_std * noise
+        if noise_level == 0.0:
+            # Deterministic (ODE) step: the noise is multiplied by a zero
+            # coefficient, so drawing it changes nothing about the result - but it
+            # does advance `generator`, and that made eval depend on how it was
+            # chunked. _evaluate chunks by train_batch_size, so the same untrained
+            # model on the same prompts with the same eval_seed scored 0.583 at
+            # train_batch_size=8 and 0.633 at 4: a memory knob moving the reported
+            # number by more than most of the effects being measured. Not drawing
+            # here makes eval consume RNG only for the initial latents, which are
+            # filled contiguously and are therefore chunk-invariant.
+            prev_sample = prev_sample_mean
+        else:
+            noise = torch.randn(sample.shape, dtype=sample.dtype, device=sample.device, generator=generator)
+            prev_sample = prev_sample_mean + noise_std * noise
     else:
         prev_sample = prev_sample.float()
 

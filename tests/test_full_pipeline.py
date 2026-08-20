@@ -2089,3 +2089,63 @@ def test_no_sde_window_keeps_every_step():
     out = _run_tiny_sd3_rollout(n_steps=n_steps, sde_window=None)
     assert out.log_probs.shape[1] == n_steps
     assert len(out.timesteps) == n_steps + 1
+
+
+def test_eval_is_invariant_to_the_chunk_size_it_runs_in():
+    """A deterministic eval must not depend on train_batch_size.
+
+    _evaluate chunks its sampling by train_batch_size, sharing one seeded
+    generator across the chunks. sde_step_with_logprob used to draw noise on every
+    step even at noise_level=0, where it is multiplied by a zero coefficient and
+    cannot affect the output - but it advanced the generator, so a different chunk
+    size shifted the initial latents of every chunk after the first.
+
+    Measured on hardware before the fix: the same untrained SD3.5-Medium, the same
+    64 prompts, the same eval_seed, scored 0.583 at train_batch_size=8 and 0.633
+    at 4. train_batch_size is meant to be a pure memory knob - with
+    grad_accumulate it no longer changes the optimization either - so it must not
+    move the reported number at all.
+    """
+    n_steps, C, H, W = 6, 4, 8, 8
+
+    def run(chunk, total=8):
+        gen = torch.Generator().manual_seed(1234)
+        outs = []
+        for start in range(0, total, chunk):
+            b = min(chunk, total - start)
+            lat = torch.randn(b, C, H, W, generator=gen)
+            for i in range(n_steps):
+                sigma = torch.full((b,), 0.9 - 0.1 * i)
+                sigma_next = torch.full((b,), 0.9 - 0.1 * (i + 1))
+                model_out = torch.zeros(b, C, H, W)
+                lat, _, _ = sde_step_with_logprob(
+                    model_out, sigma, sigma_next, lat, noise_level=0.0, generator=gen
+                )
+            outs.append(lat)
+        return torch.cat(outs, dim=0)
+
+    a, b = run(chunk=8), run(chunk=4)
+    assert torch.allclose(a, b, atol=1e-6), (
+        "deterministic eval differs between chunk sizes: max |diff| = "
+        f"{(a - b).abs().max():.6f}. train_batch_size is changing the measurement."
+    )
+
+    # and the stochastic path must be untouched by the fix
+    def run_sde(chunk, total=8):
+        gen = torch.Generator().manual_seed(7)
+        outs = []
+        for start in range(0, total, chunk):
+            n = min(chunk, total - start)
+            lat = torch.randn(n, C, H, W, generator=gen)
+            sigma, sigma_next = torch.full((n,), 0.9), torch.full((n,), 0.8)
+            lat, _, _ = sde_step_with_logprob(
+                torch.zeros(n, C, H, W), sigma, sigma_next, lat,
+                noise_level=0.7, generator=gen,
+            )
+            outs.append(lat)
+        return torch.cat(outs, dim=0)
+
+    assert not torch.allclose(run_sde(8), run_sde(4), atol=1e-6), (
+        "the stochastic path should still consume RNG per step; if this passes, "
+        "noise is no longer being drawn during training either"
+    )
