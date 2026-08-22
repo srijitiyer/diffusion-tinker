@@ -276,6 +276,15 @@ class BaseDiffusionTrainer(ABC):
         from peft.utils import get_peft_model_state_dict
 
         path.mkdir(parents=True, exist_ok=True)
+        # Save the AVERAGED weights when EMA is on, which is what FlowGRPO does
+        # (its save_ckpt copies the EMA in around the write) and, more importantly,
+        # what our own eval curve is measured through. Saving the live weights here
+        # meant a checkpoint evaluated later scored something the curve never
+        # reported, and something not comparable to the published numbers either.
+        swapped = False
+        if self._ema is not None:
+            self._ema.swap_in(self.transformer.parameters())
+            swapped = True
         try:
             state = get_peft_model_state_dict(self.transformer)
             torch.save(state, path / "adapter_model.bin")
@@ -283,6 +292,12 @@ class BaseDiffusionTrainer(ABC):
             # if the adapter cannot be isolated, fall back rather than lose the
             # checkpoint entirely
             self.transformer.save_pretrained(str(path))
+        finally:
+            # Must run on every path. Leaving the average in place would mean
+            # training continues from it, turning the optimizer state into a
+            # lagged copy of itself - silent, and unrecoverable after one epoch.
+            if swapped:
+                self._ema.swap_out(self.transformer.parameters())
 
     def _fire_callbacks(self, method: str, **kwargs):
         for cb in self.callbacks:

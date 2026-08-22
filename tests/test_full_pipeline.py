@@ -2192,3 +2192,63 @@ def test_eval_draws_its_noise_once_not_per_chunk():
         assert "if init_latents is not None" in fsrc, (
             f"{mod} sampler ignores init_latents and draws its own noise"
         )
+
+
+def test_saved_checkpoints_hold_the_ema_weights():
+    """A checkpoint must contain what the eval curve was measured through.
+
+    FlowGRPO's save_ckpt copies the EMA into the model around the write. Ours saved
+    the live weights while _evaluate had already swapped the average back out, so a
+    checkpoint scored later measured something the curve never reported and
+    something not comparable to the published numbers.
+
+    Also pins the swap-out: leaving the average in the model would mean training
+    continues from it, which turns the optimizer state into a lagged copy of
+    itself and is unrecoverable after one epoch.
+    """
+    import tempfile
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from diffusion_tinker.core.ema import ParameterEMA
+    from diffusion_tinker.trainers.base_trainer import BaseDiffusionTrainer
+
+    model = torch.nn.Linear(4, 4, bias=False)
+    with torch.no_grad():
+        model.weight.fill_(1.0)
+    ema = ParameterEMA(model.parameters(), decay=0.9, update_step_interval=1)
+    with torch.no_grad():
+        model.weight.fill_(3.0)          # live weights move away from the average
+    ema.step(model.parameters(), step=0)  # shadow -> 1 + 0.9*(3-1) = 2.8
+
+    shadow = float(ema.shadow[0][0, 0])
+    live = float(model.weight[0, 0])
+    assert not math.isclose(shadow, live, abs_tol=1e-6), "test setup: these must differ"
+
+    saved = {}
+
+    def fake_state_dict(m):
+        return {"w": m.weight.detach().clone()}
+
+    import peft.utils as peft_utils
+
+    real = peft_utils.get_peft_model_state_dict
+    peft_utils.get_peft_model_state_dict = fake_state_dict
+    real_save = torch.save
+    torch.save = lambda obj, path: saved.update(obj)
+    try:
+        stub = SimpleNamespace(transformer=model, _ema=ema)
+        with tempfile.TemporaryDirectory() as d:
+            BaseDiffusionTrainer._save_adapter(stub, Path(d) / "ckpt")
+    finally:
+        peft_utils.get_peft_model_state_dict = real
+        torch.save = real_save
+
+    assert math.isclose(float(saved["w"][0, 0]), shadow, abs_tol=1e-6), (
+        f"checkpoint holds {float(saved['w'][0, 0])} (live={live}); it must hold "
+        f"the EMA average {shadow}"
+    )
+    assert math.isclose(float(model.weight[0, 0]), live, abs_tol=1e-6), (
+        "the live weights must be restored after saving, or training continues "
+        "from the average"
+    )
