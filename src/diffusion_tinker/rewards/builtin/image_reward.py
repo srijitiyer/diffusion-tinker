@@ -27,9 +27,62 @@ class ImageRewardReward(BaseReward):
         super().__init__(device=device, dtype=dtype)
         self._model = None
 
+    @staticmethod
+    def _patch_transformers_for_blip():
+        """ImageReward's vendored BLIP imports three helpers from
+        transformers.modeling_utils. Two moved to transformers.pytorch_utils
+        and the third was dropped outright by transformers 5. Supply them,
+        because pinning transformers low enough for the old path breaks the
+        SD3.5 and FLUX pipelines sharing this environment.
+
+        find_pruneable_heads_and_indices only runs when pruning attention
+        heads, which BLIP never does here, but it has to exist to import.
+        """
+        import transformers.modeling_utils as mu
+        import transformers.pytorch_utils as pu
+
+        for n in ("apply_chunking_to_forward", "prune_linear_layer"):
+            if not hasattr(mu, n):
+                setattr(mu, n, getattr(pu, n))
+
+        if not hasattr(mu, "find_pruneable_heads_and_indices"):
+
+            def find_pruneable_heads_and_indices(heads, n_heads, head_size, already_pruned_heads):
+                mask = torch.ones(n_heads, head_size)
+                heads = set(heads) - already_pruned_heads
+                for head in heads:
+                    head = head - sum(1 if h < head else 0 for h in already_pruned_heads)
+                    mask[head] = 0
+                mask = mask.view(-1).contiguous().eq(1)
+                index = torch.arange(len(mask))[mask].long()
+                return heads, index
+
+            mu.find_pruneable_heads_and_indices = find_pruneable_heads_and_indices
+
+    @staticmethod
+    def _check_transformers_supported():
+        """transformers 5 also dropped additional_special_tokens_ids, which
+        BLIP's init_tokenizer assigns from. That one cannot be shimmed from
+        out here without reaching into the tokenizer class, so say so plainly
+        rather than surfacing an AttributeError three frames into vendored
+        BLIP code.
+        """
+        import transformers
+
+        major = int(transformers.__version__.split(".")[0])
+        if major >= 5:
+            raise RuntimeError(
+                f"ImageReward vendors BLIP written against transformers 4.x and this "
+                f"environment has {transformers.__version__}. Score saved images in a "
+                f"separate environment pinned to transformers<5 instead of downgrading "
+                f"here, which would break the SD3/FLUX pipelines."
+            )
+
     def _ensure_loaded(self):
         if self._model is not None:
             return
+        self._check_transformers_supported()
+        self._patch_transformers_for_blip()
         import ImageReward as RM
 
         self._model = RM.load(_MODEL_ID, device=str(self.device))
