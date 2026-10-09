@@ -2252,3 +2252,73 @@ def test_saved_checkpoints_hold_the_ema_weights():
         "the live weights must be restored after saving, or training continues "
         "from the average"
     )
+
+
+def test_imagereward_scores_the_batch_in_one_pass():
+    """ImageReward must score paired (image, prompt), not broadcast one prompt.
+
+    Upstream score() handles a single pair and calls .item(). Driving BLIP
+    directly is what lets us score a batch, so this checks the pairing survives:
+    two different prompts on the same image must not collapse to one value.
+    """
+    from types import SimpleNamespace
+
+    from diffusion_tinker.rewards.builtin.image_reward import ImageRewardReward
+
+    seen = {}
+
+    class FakeBlip:
+        def __init__(self):
+            self.tokenizer = self._tok
+            self.visual_encoder = self._vis
+            self.text_encoder = self._txt
+
+        def _tok(self, prompts, **kw):
+            seen["prompts"] = list(prompts)
+            n = len(prompts)
+            ids = torch.arange(n).unsqueeze(1).repeat(1, 4)
+            return SimpleNamespace(
+                input_ids=ids,
+                attention_mask=torch.ones(n, 4, dtype=torch.long),
+                to=lambda d: seen["tok"],
+            )
+
+        def _vis(self, px):
+            seen["n_images"] = px.shape[0]
+            return torch.ones(px.shape[0], 3, 8)
+
+        def _txt(self, ids, **kw):
+            # last_hidden_state[:, 0, :] must carry per-row identity
+            h = ids[:, :1].float().repeat(1, 8).unsqueeze(1)
+            return SimpleNamespace(last_hidden_state=h)
+
+    blip = FakeBlip()
+    tok = blip._tok(["", ""])
+    seen["tok"] = SimpleNamespace(
+        input_ids=torch.tensor([[0, 0, 0, 0], [1, 1, 1, 1]]),
+        attention_mask=torch.ones(2, 4, dtype=torch.long),
+    )
+
+    r = ImageRewardReward(device="cpu")
+    r._model = SimpleNamespace(
+        blip=blip,
+        preprocess=lambda img: torch.zeros(3, 4, 4),
+        mlp=lambda f: f[:, :1],
+        mean=0.0,
+        std=2.0,
+    )
+
+    ctx = RewardContext(
+        images=[Image.new("RGB", (32, 32)), Image.new("RGB", (32, 32))],
+        prompts=["a cat", "a dog"],
+    )
+    out = r._compute(ctx)
+
+    assert seen["n_images"] == 2, "images were not batched"
+    assert seen["prompts"] == ["a cat", "a dog"], "prompts were not passed pairwise"
+    assert out.scores.shape == (2,), f"wrong shape: {out.scores.shape}"
+    assert out.scores[0] != out.scores[1], "distinct prompts collapsed to one score"
+    # (raw - mean) / std with raw = row index, mean 0, std 2
+    assert torch.allclose(out.scores, torch.tensor([0.0, 0.5])), out.scores
+
+    print("  imagereward_batch: OK")

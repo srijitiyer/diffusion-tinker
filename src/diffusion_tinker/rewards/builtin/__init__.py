@@ -19,3 +19,8 @@ try:
     from diffusion_tinker.rewards.builtin import hps_v2  # noqa: F401
 except ImportError:
     pass
+
+try:
+    from diffusion_tinker.rewards.builtin import image_reward  # noqa: F401
+except ImportError:
+    pass
