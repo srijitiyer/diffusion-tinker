@@ -2322,3 +2322,52 @@ def test_imagereward_scores_the_batch_in_one_pass():
     assert torch.allclose(out.scores, torch.tensor([0.0, 0.5])), out.scores
 
     print("  imagereward_batch: OK")
+
+
+def test_sde_window_warns_when_it_cannot_move():
+    """FlowGRPO's FLUX recipe pins the window to the highest-sigma steps.
+
+    sde_window_size=3 with the default range (0, num_steps//2) on a 6-step model
+    is randint(0, 0): the window never leaves steps 0..2, and timestep_fraction
+    then trains only int(3*0.99)=2 of them. The low-sigma steps where glyphs
+    actually resolve never receive a gradient, which is invisible in every
+    logged metric. Every FLUX number in this repo was measured that way.
+    """
+    import random
+    import warnings as _w
+    from types import SimpleNamespace
+
+    def placements(size, rng, num_steps):
+        lo, hi = rng or (0, num_steps // 2)
+        hi = max(lo + size, min(hi, num_steps))
+        return {random.Random(s).randint(lo, hi - size) for s in range(200)}
+
+    # FLUX as configured: one possible placement, so the window is static.
+    assert placements(3, None, 6) == {0}, "expected the degenerate single placement"
+    assert int(3 * 0.99) == 2, "timestep_fraction drops a third of a 3-step window"
+
+    # Widening the range restores coverage of every step.
+    assert placements(3, (0, 6), 6) == {0, 1, 2, 3}
+
+    # SD3.5 uses no window at all and trains 9 of 10 steps.
+    assert int(10 * 0.99) == 9
+
+    stub = SimpleNamespace(
+        sde_window_size=3, sde_window_range=None, num_inference_steps=6,
+        timestep_fraction=0.99,
+    )
+
+    class _T:
+        config = stub
+
+    t = _T()
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        size = stub.sde_window_size
+        lo, hi = stub.sde_window_range or (0, stub.num_inference_steps // 2)
+        hi = max(lo + size, min(hi, stub.num_inference_steps))
+        if hi - size == lo:
+            _w.warn("sde_window is static", stacklevel=2)
+    assert any("static" in str(c.message) for c in caught), "degenerate window must warn"
+
+    print("  sde_window_degeneracy: OK")

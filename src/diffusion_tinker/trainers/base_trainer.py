@@ -152,6 +152,25 @@ class BaseDiffusionTrainer(ABC):
             hi = max(lo + size, min(hi, self.config.num_inference_steps))
             start = random.randint(lo, hi - size)
             sde_window = (start, start + size)
+            # The default range is FlowGRPO's (0, steps//2). It collapses to a
+            # single placement when the window fills it, which is exactly what
+            # happens on their 6-step FLUX recipe: size 3 into (0, 3) means
+            # randint(0, 0), so the window never moves off steps 0..2 and the
+            # low-sigma steps never receive a gradient at all. Say so once,
+            # because nothing downstream reveals it.
+            if hi - size == lo and not getattr(self, "_warned_static_window", False):
+                self._warned_static_window = True
+                trained = max(1, int(size * self.config.timestep_fraction))
+                warnings.warn(
+                    f"sde_window is static at steps [{start}, {start + size}) of "
+                    f"{self.config.num_inference_steps}: range {(lo, hi)} admits one "
+                    f"placement for size {size}. With "
+                    f"timestep_fraction={self.config.timestep_fraction} only {trained} "
+                    f"step(s) per trajectory are trained, always the highest-sigma ones. "
+                    f"Widen sde_window_range (e.g. (0, {self.config.num_inference_steps})) "
+                    f"to let it move.",
+                    stacklevel=2,
+                )
 
         for p in prompts:
             batch = [p] * self.config.num_samples_per_prompt
