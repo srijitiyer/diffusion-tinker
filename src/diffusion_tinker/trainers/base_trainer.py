@@ -400,11 +400,27 @@ class BaseDiffusionTrainer(ABC):
 
                 unique_prompts = list(dict.fromkeys(trajectory.prompts))
                 per_prompt_rewards = []
+                # GRPO divides by the within-group std, so a group whose samples
+                # all score alike contributes no gradient however many epochs it
+                # runs. The mean alone cannot show that, and at two decimals a
+                # group scoring [0.02, 0, 0, 0, 0, 0] prints 0.00 and reads as
+                # flat when it is not - which is where report/analyze_flatgroups.py
+                # ran aground. Log the spread itself, at full precision.
+                group_stds = []
                 for p in unique_prompts:
                     idxs = [i for i, tp in enumerate(trajectory.prompts) if tp == p]
-                    pr = trajectory.rewards[idxs].mean().item()
+                    g = trajectory.rewards[idxs]
+                    pr = g.mean().item()
+                    gs = g.std().item() if g.numel() > 1 else 0.0
+                    group_stds.append(gs)
                     per_prompt_rewards.append(f"{p[:15]}={pr:.2f}")
                 log_str += f" | per_prompt=[{', '.join(per_prompt_rewards)}]"
+                if group_stds:
+                    n_flat = sum(1 for g in group_stds if g < 1e-6)
+                    log_str += (
+                        f" | group_std={sum(group_stds)/len(group_stds):.6f}"
+                        f" | flat_groups={n_flat}/{len(group_stds)}"
+                    )
                 print(log_str)
 
             self._fire_callbacks("on_epoch_end", epoch=epoch, metrics=metrics)

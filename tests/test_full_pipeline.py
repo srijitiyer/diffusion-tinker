@@ -2371,3 +2371,41 @@ def test_sde_window_warns_when_it_cannot_move():
     assert any("static" in str(c.message) for c in caught), "degenerate window must warn"
 
     print("  sde_window_degeneracy: OK")
+
+
+def test_group_std_logging_distinguishes_flat_from_small():
+    """A group of nearly-identical rewards is not the same as a flat one.
+
+    GRPO normalises the advantage by the within-group std, so a group whose
+    samples all score alike contributes nothing no matter how long training
+    runs. The old per_prompt line logged only the group mean at two decimals,
+    which cannot tell [0.02, 0, 0, 0] from [0, 0, 0, 0] -- both print 0.00.
+    That is precisely why report/analyze_flatgroups.py could not answer the
+    question it was written for.
+    """
+    import torch as _t
+
+    def summarise(groups):
+        stds = [_t.tensor(g).std().item() if len(g) > 1 else 0.0 for g in groups]
+        return sum(stds) / len(stds), sum(1 for s in stds if s < 1e-6)
+
+    truly_flat = [[0.0, 0.0, 0.0, 0.0], [0.5, 0.5, 0.5, 0.5]]
+    mean_std, n_flat = summarise(truly_flat)
+    assert mean_std == 0.0 and n_flat == 2
+
+    # analyze_flatgroups.py's own example: at a group size of 6 both of these
+    # print 0.00 as a mean, yet only the second is genuinely flat.
+    barely_moving = [[0.02, 0.0, 0.0, 0.0, 0.0, 0.0], [0.0] * 6]
+    mean_std, n_flat = summarise(barely_moving)
+    assert n_flat == 1, "a group with any spread must not count as flat"
+    assert mean_std > 0.0, "spread must survive to the log"
+    m0 = round(sum(barely_moving[0]) / 6, 2)
+    m1 = round(sum(barely_moving[1]) / 6, 2)
+    assert m0 == m1 == 0.00, \
+        "both read 0.00 at two decimals, which is why the mean cannot answer this"
+
+    healthy = [[0.0, 0.3, 0.15, 0.3], [0.1, 0.9, 0.4, 0.6]]
+    mean_std, n_flat = summarise(healthy)
+    assert n_flat == 0 and mean_std > 0.1
+
+    print("  group_std_logging: OK")
