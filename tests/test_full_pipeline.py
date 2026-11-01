@@ -2409,3 +2409,52 @@ def test_group_std_logging_distinguishes_flat_from_small():
     assert n_flat == 0 and mean_std > 0.1
 
     print("  group_std_logging: OK")
+
+
+def test_replay_reuses_the_sampled_noise_level_not_its_local_index():
+    """Replaying a windowed step at noise 0 silently kills its gradient.
+
+    The rollout decides each step's noise level from its GLOBAL index; the
+    replay walks the stored window with a LOCAL one. On the last stored step
+    the local index looks terminal while the global index is interior, so a
+    replay that re-derives the level evaluates a Gaussian with std 0 against a
+    sample drawn at std > 0. log_prob goes to about -2e11, exp() of the
+    difference underflows to exactly 0, and the step contributes no gradient
+    and no NaN - it just vanishes.
+    """
+    from diffusion_tinker.core.noise_strategy import sde_step_with_logprob
+
+    torch.manual_seed(0)
+    B, C, H, W = 2, 4, 8, 8
+    model_out = torch.randn(B, C, H, W)
+    sample = torch.randn(B, C, H, W)
+    sigma = torch.full((B,), 0.75)
+    sigma_next = torch.full((B,), 0.60)
+    sampled_at = 0.7
+
+    # rollout: this step was interior globally, so it carried real noise
+    nxt, logp_old, _ = sde_step_with_logprob(
+        model_output=model_out, sigma=sigma, sigma_next=sigma_next,
+        sample=sample, noise_level=sampled_at,
+        generator=torch.Generator().manual_seed(1),
+    )
+
+    # replay re-deriving from the local index: looks terminal -> noise 0
+    _, logp_wrong, _ = sde_step_with_logprob(
+        model_output=model_out, sigma=sigma, sigma_next=sigma_next,
+        sample=sample, noise_level=0.0, prev_sample=nxt,
+    )
+    ratio_wrong = torch.exp(logp_wrong.float() - logp_old.float())
+    assert torch.all(ratio_wrong == 0.0), (
+        f"expected the degenerate replay to underflow to 0, got {ratio_wrong}")
+
+    # replay reusing the recorded level: ratio is 1 for an unchanged policy
+    _, logp_right, _ = sde_step_with_logprob(
+        model_output=model_out, sigma=sigma, sigma_next=sigma_next,
+        sample=sample, noise_level=sampled_at, prev_sample=nxt,
+    )
+    ratio_right = torch.exp(logp_right.float() - logp_old.float())
+    assert torch.allclose(ratio_right, torch.ones_like(ratio_right), atol=1e-5), \
+        f"unchanged policy must replay to ratio 1, got {ratio_right}"
+
+    print("  replay_noise_level: OK")

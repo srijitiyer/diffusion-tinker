@@ -84,7 +84,15 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
                 if not has_signal:
                     continue
 
-                step_noise_level = config.noise_level if j < num_steps - 1 else 0.0
+                # Reuse the level this step was SAMPLED at. Re-deriving it from the
+                # local index j is wrong whenever a window is in use: the last stored
+                # step looks terminal locally while the rollout treated it as interior,
+                # so the replay evaluates a degenerate Gaussian, the ratio underflows to
+                # exactly 0, and that step contributes no gradient at all - silently.
+                if getattr(mb, "step_noise_levels", None) is not None:
+                    step_noise_level = float(mb.step_noise_levels[j])
+                else:
+                    step_noise_level = config.noise_level if j < num_steps - 1 else 0.0
                 # cache_enabled=False to match the sampling forward exactly. With
                 # the default cache on, the replay forward's noise_pred differs
                 # slightly from sampling's, and the SDE log-prob amplifies that into

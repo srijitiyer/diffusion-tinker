@@ -32,6 +32,11 @@ class TrajectoryBatch:
     negative_pooled_embeds: torch.Tensor | None = None
     img_ids: torch.Tensor | None = None
     txt_ids: torch.Tensor | None = None
+    # The noise level each stored step was actually SAMPLED at. The replay has
+    # to reuse it exactly: it indexes the window locally while the rollout
+    # decides per global step, so a replay that re-derives this from its own
+    # index silently disagrees on the last in-window step.
+    step_noise_levels: torch.Tensor | None = None
     rewards: torch.Tensor | None = None
     advantages: torch.Tensor | None = None
     images: list[Image.Image] = field(default_factory=list)
@@ -56,6 +61,7 @@ class TrajectoryBatch:
             latents=self.latents[idx],
             next_latents=self.next_latents[idx],
             log_probs=self.log_probs[idx],
+            step_noise_levels=self.step_noise_levels,
             timesteps=self.timesteps,
             prompt_embeds=self.prompt_embeds[idx],
             pooled_embeds=self.pooled_embeds[idx],

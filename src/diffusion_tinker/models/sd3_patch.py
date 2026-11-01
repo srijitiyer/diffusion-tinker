@@ -42,6 +42,7 @@ class SD3SamplingOutput:
     latents_trajectory: torch.Tensor  # (B, T, C, H, W) - latent before each step
     next_latents_trajectory: torch.Tensor  # (B, T, C, H, W) - latent after each step
     log_probs: torch.Tensor  # (B, T)
+    step_noise_levels: torch.Tensor  # (T,) noise level each step was sampled at
     timesteps: torch.Tensor  # (T+1,) - full sigma schedule (includes terminal sigma=0)
     prompt_embeds: torch.Tensor  # (B, seq_len, dim)
     pooled_embeds: torch.Tensor  # (B, pooled_dim)
@@ -112,6 +113,7 @@ def sd3_sample_with_logprob(
     all_latents = []
     all_next_latents = []
     all_log_probs = []
+    all_step_noise = []
 
     # FlowGRPO's windowed SDE: run stochastically on a short contiguous window of
     # steps and deterministically everywhere else, training only on the window
@@ -181,6 +183,12 @@ def sd3_sample_with_logprob(
         if in_window:
             all_next_latents.append(latents.detach().cpu())
             all_log_probs.append(log_prob.detach().cpu())
+            # Record what this step was actually sampled at. The replay indexes
+            # the window locally and cannot re-derive this: on the last stored
+            # step its local index looks terminal even when the global one is
+            # not, and replaying at noise 0 makes the Gaussian degenerate, the
+            # ratio underflow to exactly 0, and the gradient vanish silently.
+            all_step_noise.append(float(step_noise_level))
 
         latents = latents.to(dtype)
 
@@ -195,6 +203,7 @@ def sd3_sample_with_logprob(
         latents_trajectory=latents_traj,
         next_latents_trajectory=next_latents_traj,
         log_probs=log_probs_traj,
+        step_noise_levels=torch.tensor(all_step_noise),
         # Only the window's sigmas, so trajectory.timesteps[j] and [j+1] still
         # line up with stored step j. With no window this is the whole schedule.
         timesteps=sigmas[w_start:w_end + 1].cpu(),

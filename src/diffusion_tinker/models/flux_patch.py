@@ -41,6 +41,7 @@ class FluxSamplingOutput:
     latents_trajectory: torch.Tensor  # (B, T, seq_len, inner_dim) - packed latents
     next_latents_trajectory: torch.Tensor
     log_probs: torch.Tensor  # (B, T)
+    step_noise_levels: torch.Tensor  # (T,) noise level each step was sampled at
     timesteps: torch.Tensor  # (T+1,)
     prompt_embeds: torch.Tensor  # (B, seq_len, 4096)
     pooled_embeds: torch.Tensor  # (B, 768)
@@ -175,6 +176,7 @@ def flux_sample_with_logprob(
     all_latents = []
     all_next_latents = []
     all_log_probs = []
+    all_step_noise = []
 
     # FLUX.1-dev embeds a guidance scalar (guidance_embeds=True); FLUX.1-schnell
     # is not guidance-distilled and rejects a guidance tensor, so pass None there.
@@ -236,6 +238,12 @@ def flux_sample_with_logprob(
         if in_window:
             all_next_latents.append(latents.detach().cpu())
             all_log_probs.append(log_prob.detach().cpu())
+            # Record what this step was actually sampled at. The replay indexes
+            # the window locally and cannot re-derive this: on the last stored
+            # step its local index looks terminal even when the global one is
+            # not, and replaying at noise 0 makes the Gaussian degenerate, the
+            # ratio underflow to exactly 0, and the gradient vanish silently.
+            all_step_noise.append(float(step_noise_level))
 
         latents = latents.to(dtype)
 
@@ -260,6 +268,7 @@ def flux_sample_with_logprob(
         latents_trajectory=torch.stack(all_latents, dim=1),
         next_latents_trajectory=torch.stack(all_next_latents, dim=1),
         log_probs=torch.stack(all_log_probs, dim=1),
+        step_noise_levels=torch.tensor(all_step_noise),
         timesteps=sigmas[w_start:w_end + 1].cpu(),
         prompt_embeds=prompt_embeds.detach().cpu(),
         pooled_embeds=pooled_prompt_embeds.detach().cpu(),
