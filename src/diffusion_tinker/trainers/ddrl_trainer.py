@@ -239,7 +239,13 @@ class DDRLTrainer(BaseDiffusionTrainer):
         num_clips = 0
         num_computed_steps = 0
 
-        num_train = max(1, int(num_steps * config.timestep_fraction))
+        # See flowgrpo_trainer: when a window is active log_probs already holds
+        # only the window's steps, so applying the fraction again takes a second
+        # bite out of an already-small set. Upstream applies one or the other.
+        if getattr(config, "sde_window_size", 0) > 0:
+            num_train = num_steps
+        else:
+            num_train = max(1, int(num_steps * config.timestep_fraction))
         stride = max(1, getattr(config, "timestep_stride", 1))
         timestep_indices = list(range(0, num_steps if stride > 1 else num_train, stride))
         if stride > 1:

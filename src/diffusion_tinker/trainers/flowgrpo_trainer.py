@@ -26,7 +26,18 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
 
         # Train on the first timestep_fraction of steps (drop the low-sigma tail
         # where the log-prob / ratio is ill-conditioned, like FlowGRPO).
-        num_train = max(1, int(num_steps * config.timestep_fraction))
+        #
+        # Not when a window is in use. log_probs already holds only the window's
+        # steps, so multiplying again takes a second bite: on FLUX's 3-step
+        # window int(3*0.99) is 2, which drops a third of the trained steps and
+        # cuts sigma coverage from 34.8% of the trajectory to 21.0%. Upstream
+        # flow_grpo does not do this - train_flux_fast.py sets
+        # num_train_timesteps = sde_window_size directly and never applies the
+        # fraction when the window is on.
+        if getattr(config, "sde_window_size", 0) > 0:
+            num_train = num_steps
+        else:
+            num_train = max(1, int(num_steps * config.timestep_fraction))
         timestep_indices = list(range(num_train))
         if config.num_train_timesteps is not None and config.num_train_timesteps < len(timestep_indices):
             timestep_indices = sorted(random.sample(timestep_indices, config.num_train_timesteps))
@@ -35,6 +46,8 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
         total_rl_loss = 0.0
         total_kl_loss = 0.0
         total_ratio = 0.0
+        total_clipfrac = 0.0
+        total_absdev = 0.0
         num_computed_steps = 0
 
         autocast_dtype = torch.bfloat16 if config.mixed_precision == "bf16" else torch.float16
@@ -103,6 +116,19 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
                     ratio = ratio / (ratio.mean().detach() + 1e-8)
 
                 advantages = mb.advantages
+                # How often the trust region actually binds. mean_ratio alone
+                # cannot distinguish "the clip is doing nothing" from "the clip
+                # is gating every sample", and those call for opposite fixes.
+                # Split by advantage sign because the clip is one-sided per
+                # sign: for A>0 only ratio>1+eps is gated, for A<0 only
+                # ratio<1-eps.
+                with torch.no_grad():
+                    _hi = (ratio > 1.0 + config.clip_range)
+                    _lo = (ratio < 1.0 - config.clip_range)
+                    _pos = mb.advantages > 0
+                    total_clipfrac += ((_hi & _pos) | (_lo & ~_pos)).float().mean().item()
+                    total_absdev += (ratio - 1.0).abs().mean().item()
+
                 unclipped = -advantages * ratio
                 clipped = -advantages * torch.clamp(ratio, 1.0 - config.clip_range, 1.0 + config.clip_range)
                 rl_loss = torch.mean(torch.maximum(unclipped, clipped))
@@ -167,6 +193,8 @@ class FlowGRPOTrainer(BaseDiffusionTrainer):
             "rl_loss": total_rl_loss / n,
             "kl_loss": total_kl_loss / n,
             "mean_ratio": total_ratio / n,
+            "clip_frac": total_clipfrac / n,
+            "mean_abs_ratio_dev": total_absdev / n,
             "mean_reward": trajectory.rewards.mean().item(),
             "mean_advantage": trajectory.advantages.mean().item(),
             "advantage_std": trajectory.advantages.std().item(),

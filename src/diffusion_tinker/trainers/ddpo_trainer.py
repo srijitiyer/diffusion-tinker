@@ -51,7 +51,13 @@ class DDPOTrainer(BaseDiffusionTrainer):
         batch_size = len(trajectory)
         mb_size = config.train_batch_size or batch_size
 
-        num_train = max(1, int(num_steps * config.timestep_fraction))
+        # See flowgrpo_trainer: when a window is active log_probs already holds
+        # only the window's steps, so applying the fraction again takes a second
+        # bite out of an already-small set. Upstream applies one or the other.
+        if getattr(config, "sde_window_size", 0) > 0:
+            num_train = num_steps
+        else:
+            num_train = max(1, int(num_steps * config.timestep_fraction))
 
         # Skip the update when the advantages carry no signal. FlowGRPO does this
         # by continuing past the timestep and DDRL by gating its anchor; DDPO had
