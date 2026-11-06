@@ -1,0 +1,12 @@
+Hi Haotian,
+
+Grid attached, all three cells. The baseline lines up with the paper, 0.572 against 0.566.
+
+Both SD3.5 tasks have the same shape. FlowGRPO's reward drains as beta goes up, DDRL's does not. At 0.001 against FlowGRPO's 0.04, DDRL keeps three times the reward on OCR and seven times on counting, and PickScore lands back at baseline either way.
+
+FLUX goes the other direction. Nothing improves OCR and DDRL costs reward. Could be the model, could be that FLUX got a quarter of the budget. I cannot separate those yet.
+
+One thing that does not hold up: the anchor tightens seed spread on OCR but not on counting, where beta=0 was the tightest row of all.
+
+Thanks,
+Srijit

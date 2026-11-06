@@ -74,3 +74,10 @@ report/diffusion_tinker_walkthrough.tex
 report/blog.md
 AUDIT.md
 VALIDATION.md
+
+# LaTeX build artifacts
+*.aux
+*.out
+*.toc
+*.synctex.gz
+report/**/*.log

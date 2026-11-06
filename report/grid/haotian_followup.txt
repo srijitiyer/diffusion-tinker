@@ -1,0 +1,14 @@
+Hi Haotian,
+
+Added ImageReward, new grid attached. Bold is past two standard errors.
+
+The beta=0 row is the one to look at. On OCR it takes the biggest task gain in the table and the biggest ImageReward loss, -0.211 at about nine SE. Counting is the same shape, smaller.
+
+DDRL goes the other way on both tasks. ImageReward rises with data_beta, and at 0.001 against FlowGRPO's 0.04 it is +0.081 against +0.031, significant where FlowGRPO is not.
+
+Ignore the FLUX row. My replay was scoring the last step of the 3-step SDE window at noise 0, so its ratio came out exactly 0 and that third of the window never trained. I caught it because mean_ratio sat at 0.6666 every epoch. SD3.5 runs no window, so nothing else in the grid is affected. FLUX reruns are queued.
+
+Last time I said the anchor tightens seed spread. That does not hold on counting, where beta=0 was the tightest row.
+
+Thanks,
+Srijit

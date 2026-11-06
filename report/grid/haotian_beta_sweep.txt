@@ -1,0 +1,16 @@
+Subject: data_beta sweep: null on counting, and it hurts FLUX
+
+Hi Haotian,
+
+Sweep's done, write-up attached. Short version below.
+
+On counting, data_beta does nothing measurable between 0 and 0.3. Two runs of the same config differ by more than the whole sweep does, so the noise floor is above the effect. Anything real there is under about 0.03.
+
+On exact-match OCR it does plenty, and the sign depends on the model. SD3.5 gains about 0.09 at beta=0.05, which is a clean 3 SE. FLUX loses 0.11 at beta=0.01 and 0.21 at 0.05, and neither is close to marginal. So there's no safe low setting on FLUX, 0.01 is already well below not anchoring at all.
+
+That flip is what I'd like your read on. Best I have is that a regulariser only pays for its bias where there's variance to remove, and SD3.5's unanchored runs are a lot noisier than FLUX's. Gets the direction right, the size wrong by a mile. I killed five sharper explanations along the way, all in the report.
+
+One thing worth knowing if you run FLUX through diffusers: FluxPipeline passes its own sigma grid to the scheduler and StableDiffusion3Pipeline doesn't. Adapt an SD3 sampler and you silently get a schedule ending at 0.0019 instead of 0.065, so the last Euler step covers almost none of the trajectory.
+
+Best,
+Srijit

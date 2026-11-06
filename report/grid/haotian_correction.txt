@@ -1,0 +1,16 @@
+Hi Haotian,
+
+Your gate was the right call. I reproduced the SD3.5 baseline before building anything and our number was wrong for reasons that had nothing to do with beta. Untrained SD3.5-Medium now scores 0.568 OCR against your 0.566, and ClipScore 0.322 against 0.321, on the full 1017-prompt test set.
+
+Two things mattered most. We scored with EasyOCR instead of PaddleOCR, and used our own 64 short single-word prompts instead of FlowGRPO's, so our baseline read 0.77 where yours reads 0.57. The anchor was also drawing from a pool of unrelated photographs rather than base-model samples of the prompt being rolled out.
+
+So the numbers I sent last week are void, the FLUX ones especially. We ran full SDE on every step and your geneval_flux_fast uses a 3-step window in the first half, so that was never FLUX as you run it.
+
+The thing I had backwards is what DDRL is for. I was reading only the OCR column, and Table 4 has DDRL below both baselines there by design. Measuring the reward the anchor is meant to spend scores a working anchor as a cost, which is what I reported to you.
+
+The table is running now: four data_beta values, three kl_beta, two seeds each, everything else held fixed so beta=0 is one shared run rather than two. Still early, but DDRL's OCR rises monotonically with data_beta while FlowGRPO's stays flat. One limit worth saying upfront: at 8 groups of 8 on a single GPU we get about 7% of your sample budget per arm, so I can show how performance varies with beta but I cannot put 0.845 on the table.
+
+I'll send it when the cells reach a common epoch, probably a few days.
+
+Best,
+Srijit

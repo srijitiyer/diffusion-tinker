@@ -1,0 +1,74 @@
+\documentclass[border=14pt]{standalone}
+\usepackage{booktabs}
+\usepackage[T1]{fontenc}
+\usepackage{newtxtext,newtxmath}
+\usepackage{xcolor}
+\usepackage{siunitx}
+\sisetup{table-number-alignment=center, retain-explicit-plus, detect-weight=true,
+         detect-inline-weight=math}
+\definecolor{hdr}{gray}{0.30}
+\begin{document}
+\begin{minipage}{\dimexpr 1.02\linewidth}
+\centering
+\setlength{\tabcolsep}{4.5pt}
+\small
+\begin{tabular}{l S[table-format=1.3] S[table-format=+1.3] S[table-format=+1.3] S[table-format=+1.3] S[table-format=+1.3] S[table-format=1.4]}
+\toprule
+& {\textbf{task}} & \multicolumn{4}{c}{\textbf{change vs untrained}} & {\textbf{seed}} \\
+\cmidrule(lr){3-6}
+& {reward} & {task} & {ClipScore} & {PickScore} & {ImageReward} & {spread} \\
+\midrule
+\multicolumn{7}{l}{\textcolor{hdr}{\textbf{SD3.5-Medium, OCR}}} \\
+\addlinespace[2pt]
+untrained                & 0.572 & {--} & {--} & {--} & {--} & {--} \\
+no anchor ($\beta=0$)    & 0.760 & \bfseries +0.188 & +0.122 & \bfseries -0.671 & \bfseries -0.211 & 0.0411 \\
+DDRL \; 0.0003           & 0.663 & \bfseries +0.091 & +0.111 & \bfseries -0.143 & \bfseries +0.048 & 0.0165 \\
+DDRL \; 0.001            & 0.660 & \bfseries +0.088 & -0.171 & +0.019 & \bfseries +0.081 & 0.0180 \\
+DDRL \; 0.003            & 0.668 & \bfseries +0.096 & -0.127 & -0.029 & \bfseries +0.101 & 0.0003 \\
+DDRL \; 0.01             & 0.670 & \bfseries +0.098 & -0.132 & +0.002 & \bfseries +0.100 & 0.0050 \\
+FlowGRPO \; 0.01         & 0.635 & \bfseries +0.064 & +0.099 & +0.026 & \bfseries +0.061 & 0.0242 \\
+FlowGRPO \; 0.04         & 0.598 & +0.027 & +0.076 & +0.049 & +0.031 & 0.0081 \\
+FlowGRPO \; 0.1          & 0.591 & +0.020 & +0.032 & +0.031 & +0.019 & 0.0006 \\
+\addlinespace[5pt]
+\midrule
+\multicolumn{7}{l}{\textcolor{hdr}{\textbf{SD3.5-Medium, counting}}} \\
+\addlinespace[2pt]
+untrained                & 0.484 & {--} & {--} & {--} & {--} & {--} \\
+no anchor ($\beta=0$)    & 0.567 & \bfseries +0.083 & \bfseries +0.730 & \bfseries -0.371 & \bfseries -0.101 & 0.0033 \\
+DDRL \; 0.0003           & 0.526 & \bfseries +0.042 & \bfseries +0.512 & -0.056 & -0.004 & 0.0117 \\
+DDRL \; 0.001            & 0.540 & \bfseries +0.056 & \bfseries +0.526 & +0.029 & \bfseries +0.058 & 0.0260 \\
+DDRL \; 0.003            & 0.544 & \bfseries +0.060 & \bfseries +0.483 & +0.067 & \bfseries +0.064 & 0.0077 \\
+DDRL \; 0.01             & 0.546 & \bfseries +0.062 & \bfseries +0.493 & \bfseries +0.122 & \bfseries +0.090 & 0.0091 \\
+FlowGRPO \; 0.01         & 0.522 & \bfseries +0.039 & \bfseries +0.373 & -0.053 & -0.001 & 0.0112 \\
+FlowGRPO \; 0.04         & 0.491 & +0.008 & +0.113 & -0.008 & +0.014 & 0.0047 \\
+FlowGRPO \; 0.1          & 0.489 & +0.005 & +0.056 & +0.014 & +0.009 & 0.0127 \\
+\addlinespace[5pt]
+\midrule
+\multicolumn{7}{l}{\textcolor{hdr}{\textbf{FLUX.1-dev, OCR} \;\textnormal{(withdrawn, see note)}}} \\
+\addlinespace[2pt]
+untrained                & 0.592 & {--} & {--} & {--} & {--} & {--} \\
+no anchor ($\beta=0$)    & 0.604 & +0.012 & +0.147 & +0.014 & +0.003 & 0.0931 \\
+DDRL \; 0.001            & 0.519 & \bfseries -0.074 & +0.126 & \bfseries +0.108 & -0.023 & 0.0053 \\
+FlowGRPO \; 0.04         & 0.570 & -0.023 & -0.248 & \bfseries -0.089 & -0.019 & 0.0842 \\
+\addlinespace[5pt]
+\bottomrule
+\end{tabular}
+
+\vspace{7pt}
+{\footnotesize\textcolor{hdr}{%
+Two seeds per row, full held-out test set (1017 OCR prompts; 320 counting
+prompts, 2 samples each). Everything fixed except the regulariser, so
+$\beta=0$ is one configuration shared by both families. DDRL rows vary
+\texttt{data\_beta}, FlowGRPO rows vary \texttt{kl\_beta}. \textbf{Bold} marks
+a change beyond two standard errors. ImageReward was measured by regenerating
+each arm on the GPU it was first measured on; the regenerated task reward,
+ClipScore and PickScore reproduced the originals exactly, so all four columns
+describe the same images. SD3.5 trained 150 epochs, FLUX 80, at roughly 7\% of
+the sample budget in the papers. The FLUX panel is withdrawn: with the
+3-step SDE window, the replay scored the window's last step at noise level 0,
+so its importance ratio underflowed to exactly 0 and a third of the window
+contributed no gradient. SD3.5 runs no window and is unaffected. Those arms
+are being rerun.%
+}}
+\end{minipage}
+\end{document}

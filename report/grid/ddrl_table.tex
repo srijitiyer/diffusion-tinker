@@ -1,0 +1,49 @@
+\documentclass[border=14pt]{standalone}
+\usepackage{booktabs}
+\usepackage[T1]{fontenc}
+\usepackage{newtxtext,newtxmath}
+\usepackage{xcolor}
+\usepackage{siunitx}
+\sisetup{
+  table-number-alignment = center,
+  retain-explicit-plus,
+  detect-weight = true,
+  detect-inline-weight = math,
+}
+
+\definecolor{hdr}{gray}{0.30}
+\definecolor{rule}{gray}{0.55}
+
+\begin{document}
+\begin{minipage}{\dimexpr 0.98\linewidth}
+\centering
+\begin{tabular}{l S[table-format=2.3] S[table-format=+1.3] S[table-format=2.2] S[table-format=+1.3]}
+\toprule
+& \multicolumn{2}{c}{\textbf{OCR}} & \multicolumn{2}{c}{\textbf{PickScore}} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+\textcolor{hdr}{\textbf{SD3.5-Medium, 512px}} & {value} & {$\Delta$} & {value} & {$\Delta$} \\
+\midrule
+untrained baseline           & 0.572 & {--}    & 22.54 & {--}    \\
+\addlinespace[3pt]
+no anchor ($\beta = 0$)      & 0.760 & +0.188  & 21.87 & -0.671  \\
+\addlinespace[4pt]
+DDRL \quad 0.0003            & 0.663 & +0.091  & 22.40 & -0.143  \\
+DDRL \quad 0.001             & 0.660 & +0.088  & 22.56 & +0.019  \\
+DDRL \quad 0.003             & 0.668 & +0.096  & 22.51 & -0.029  \\
+DDRL \quad 0.01              & 0.670 & +0.098  & 22.54 & +0.002  \\
+\addlinespace[4pt]
+FlowGRPO \quad 0.01          & 0.635 & +0.064  & 22.57 & +0.026  \\
+FlowGRPO \quad 0.04          & 0.598 & +0.027  & 22.59 & +0.049  \\
+FlowGRPO \quad 0.1           & 0.591 & +0.020  & 22.57 & +0.031  \\
+\bottomrule
+\end{tabular}
+
+\vspace{7pt}
+{\footnotesize\textcolor{hdr}{%
+Two seeds per row, 1017 held-out prompts, one GPU. Everything held fixed except
+the regulariser, so $\beta=0$ is a single shared run. DDRL rows vary
+\texttt{data\_beta}, FlowGRPO rows vary \texttt{kl\_beta}. PickScore is
+\texttt{logit\_scale}$\times$cosine, comparable across rows only.%
+}}
+\end{minipage}
+\end{document}
