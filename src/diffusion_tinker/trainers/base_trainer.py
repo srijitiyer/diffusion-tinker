@@ -209,6 +209,7 @@ class BaseDiffusionTrainer(ABC):
             next_latents=torch.cat([o.next_latents_trajectory for o in all_outputs], dim=0),
             log_probs=torch.cat([o.log_probs for o in all_outputs], dim=0),
             timesteps=all_outputs[0].timesteps,
+            step_noise_levels=getattr(all_outputs[0], "step_noise_levels", None),
             prompt_embeds=torch.cat([o.prompt_embeds for o in all_outputs], dim=0),
             pooled_embeds=torch.cat([o.pooled_embeds for o in all_outputs], dim=0),
             negative_prompt_embeds=torch.cat([o.negative_prompt_embeds for o in all_outputs], dim=0) if has_neg else None,
@@ -219,6 +220,20 @@ class BaseDiffusionTrainer(ABC):
             rewards=None,
             images=[img for o in all_outputs for img in o.images],
         )
+
+        # The replay falls back to deriving each step's noise level from its local
+        # index, which is only correct for a full-trajectory rollout. With a window
+        # the last stored step is interior, so the fallback hands the replay a
+        # noise level of 0, the log-prob becomes a degenerate Gaussian and the
+        # ratio underflows to exactly 0 - one dead step in every window, with no
+        # error. Refuse to train rather than report the result of that.
+        if getattr(self.config, "sde_window_size", 0) > 0 and trajectory.step_noise_levels is None:
+            raise RuntimeError(
+                "sde_window_size is set but the rollout did not return "
+                "step_noise_levels, so the replay cannot know the level each step "
+                "was sampled at. The last step of every window would be replayed "
+                "at noise level 0 and contribute no gradient."
+            )
 
         final_latents = trajectory.next_latents[:, -1] if trajectory.next_latents is not None else None
         metadata = dict(self.reward_kwargs)

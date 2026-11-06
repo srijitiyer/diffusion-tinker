@@ -2458,3 +2458,59 @@ def test_replay_reuses_the_sampled_noise_level_not_its_local_index():
         f"unchanged policy must replay to ratio 1, got {ratio_right}"
 
     print("  replay_noise_level: OK")
+
+
+def test_windowed_rollout_records_a_nonzero_level_for_its_last_step():
+    """The last stored step of a window is interior, so its level must not be 0.
+
+    This is the quantity the replay's index-based fallback gets wrong. Pin it at
+    the rollout so the trainer has something true to read.
+    """
+    n_steps, window = 8, (2, 5)
+    out = _run_tiny_sd3_rollout(n_steps=n_steps, sde_window=window)
+
+    levels = out.step_noise_levels
+    assert levels is not None, "a windowed rollout must report its per-step noise levels"
+    assert levels.shape[0] == out.log_probs.shape[1], (
+        f"one level per stored step: {levels.shape[0]} levels vs "
+        f"{out.log_probs.shape[1]} stored steps")
+    assert float(levels[-1]) > 0.0, (
+        "the last stored step of a window is interior to the trajectory, so it "
+        f"was sampled with noise; got level {float(levels[-1])}")
+
+
+def test_base_trainer_forwards_every_rollout_field_the_trajectory_declares():
+    """A field the rollout records but the trajectory never receives is dead.
+
+    step_noise_levels was recorded by the sampler, declared by TrajectoryBatch
+    and read by all three trainers, yet never passed at the one construction
+    site - so it stayed None and every trainer took its wrong-but-silent
+    fallback. Nothing failed; a third of FLUX's gradient just disappeared.
+    Checking the wiring itself, rather than each field, catches the next one.
+    """
+    import ast
+    import inspect
+
+    from diffusion_tinker.core.trajectory import TrajectoryBatch
+    from diffusion_tinker.models.flux_patch import FluxSamplingOutput
+    from diffusion_tinker.trainers import base_trainer
+
+    tree = ast.parse(inspect.getsource(base_trainer))
+    passed = {
+        kw.arg
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "TrajectoryBatch"
+        for kw in node.keywords
+        if kw.arg
+    }
+    assert passed, "could not find the TrajectoryBatch construction site"
+
+    shared = set(TrajectoryBatch.__dataclass_fields__) & set(
+        FluxSamplingOutput.__dataclass_fields__
+    )
+    dropped = sorted(shared - passed)
+    assert not dropped, (
+        f"the rollout records {dropped} and TrajectoryBatch declares them, but "
+        f"base_trainer never passes them, so they stay at their defaults")
