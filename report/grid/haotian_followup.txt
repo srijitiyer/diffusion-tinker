@@ -6,7 +6,7 @@ The beta=0 row is the one to look at. On OCR it takes the biggest task gain in t
 
 DDRL goes the other way on both tasks. ImageReward rises with data_beta, and at 0.001 against FlowGRPO's 0.04 it is +0.081 against +0.031, significant where FlowGRPO is not.
 
-Ignore the FLUX row. My replay was scoring the last step of the 3-step SDE window at noise 0, so its ratio came out exactly 0 and that third of the window never trained. I caught it because mean_ratio sat at 0.6666 every epoch. SD3.5 runs no window, so nothing else in the grid is affected. FLUX reruns are queued.
+On FLUX, it wasn't the guidance. I tried guidance, clip range, window placement, group size and the train/eval step mismatch, none of them moved it. It was a bug in my replay. With the 3-step SDE window the last step was being scored at noise 0, so its importance ratio came out exactly 0 and a third of the window never got a gradient. mean_ratio sat at 0.6666 every epoch, which is how I caught it. Fixed, it reads 0.9999 now. SD3.5 uses no window so the rest of the grid is unaffected, and I confirmed that by rerunning it. The FLUX arms are retraining, I'll send that row when they land.
 
 Last time I said the anchor tightens seed spread. That does not hold on counting, where beta=0 was the tightest row.
 

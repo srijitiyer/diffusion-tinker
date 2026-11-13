@@ -44,7 +44,7 @@ FlowGRPO \; 0.04         & 0.491 & +0.008 & +0.113 & -0.008 & +0.014 & 0.0047 \\
 FlowGRPO \; 0.1          & 0.489 & +0.005 & +0.056 & +0.014 & +0.009 & 0.0127 \\
 \addlinespace[5pt]
 \midrule
-\multicolumn{7}{l}{\textcolor{hdr}{\textbf{FLUX.1-dev, OCR} \;\textnormal{(withdrawn, see note)}}} \\
+\multicolumn{7}{l}{\textcolor{hdr}{\textbf{FLUX.1-dev, OCR} \;\textnormal{(retraining, see note)}}} \\
 \addlinespace[2pt]
 untrained                & 0.592 & {--} & {--} & {--} & {--} & {--} \\
 no anchor ($\beta=0$)    & 0.604 & +0.012 & +0.147 & +0.014 & +0.003 & 0.0931 \\
@@ -64,11 +64,12 @@ a change beyond two standard errors. ImageReward was measured by regenerating
 each arm on the GPU it was first measured on; the regenerated task reward,
 ClipScore and PickScore reproduced the originals exactly, so all four columns
 describe the same images. SD3.5 trained 150 epochs, FLUX 80, at roughly 7\% of
-the sample budget in the papers. The FLUX panel is withdrawn: with the
+the sample budget in the papers. These FLUX arms are being retrained: with the
 3-step SDE window, the replay scored the window's last step at noise level 0,
 so its importance ratio underflowed to exactly 0 and a third of the window
-contributed no gradient. SD3.5 runs no window and is unaffected. Those arms
-are being rerun.%
+contributed no gradient. Fixing it moves \texttt{mean\_ratio} from 0.6666 to
+0.9999 on an otherwise identical rollout. SD3.5 runs no window, and rerunning
+it reproduces its ratios unchanged.%
 }}
 \end{minipage}
 \end{document}
